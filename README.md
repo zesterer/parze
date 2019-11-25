@@ -52,13 +52,13 @@ let bf: Parser<_, _> = recursive(|bf| (
     .or(sym('>').to(Instr::Right))
     .or(sym(',').to(Instr::In))
     .or(sym('.').to(Instr::Out))
-    .or(sym('[').padding_for(bf).padded_by(sym(']')).map(|ts| Instr::Loop(ts)))
+    .or(sym('[').delimiter_for(bf).delimited_by(sym(']')).map(|ts| Instr::Loop(ts)))
 ).repeat(..));
 ```
 
 ## License
 
-`parze` is distributed under either of:
+Parze is distributed under either of:
 
 - Apache License, Version 2.0, (LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0)
 

@@ -20,9 +20,14 @@ type TokenIter<'a, T> = std::iter::Enumerate<std::iter::Cloned<std::slice::Iter<
 
 /// A type that represents a rule that may be used to parse a list of symbols.
 /// Parsers may be combined and manipulated in various ways to create new parsers.
-#[derive(Clone)]
 pub struct Parser<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a = DefaultParseError<T>> {
     f: Rc<dyn Fn(&mut TokenIter<T>) -> Result<(MayFail<E>, O), Fail<E>> + 'a>,
+}
+
+impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Clone for Parser<'a, T, O, E> {
+    fn clone(&self) -> Self {
+        Self { f: self.f.clone() }
+    }
 }
 
 // Then
@@ -58,16 +63,16 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a, U: Clone + 'a> Sub<U> 
     fn sub(self, rhs: U) -> Self::Output { self.to(rhs) }
 }
 
-// Padding
+// Delimiting
 
 impl<'a, T: Clone + 'a, O: 'a, U: 'a, E: ParseError<'a, T> + 'a> Shl<Parser<'a, T, U, E>> for Parser<'a, T, O, E> {
     type Output = Parser<'a, T, O, E>;
-    fn shl(self, rhs: Parser<'a, T, U, E>) -> Self::Output { self.padded_by(rhs) }
+    fn shl(self, rhs: Parser<'a, T, U, E>) -> Self::Output { self.delimited_by(rhs) }
 }
 
 impl<'a, T: Clone + 'a, O: 'a, U: 'a, E: ParseError<'a, T> + 'a> Shr<Parser<'a, T, U, E>> for Parser<'a, T, O, E> {
     type Output = Parser<'a, T, U, E>;
-    fn shr(self, rhs: Parser<'a, T, U, E>) -> Self::Output { self.padding_for(rhs) }
+    fn shr(self, rhs: Parser<'a, T, U, E>) -> Self::Output { self.delimiter_for(rhs) }
 }
 
 // Optional
@@ -136,7 +141,7 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
     }
 
     /// Create a parser that parses symbols that match this parser and then another parser, discarding the output of this parser.
-    pub fn padding_for<U: 'a>(self, other: Parser<'a, T, U, E>) -> Parser<'a, T, U, E> {
+    pub fn delimiter_for<U: 'a>(self, other: Parser<'a, T, U, E>) -> Parser<'a, T, U, E> {
         Parser::custom(move |tokens| {
             let (a_fail, _) = (self.f)(tokens)?;
             let (b_fail, b) = (other.f)(tokens)?;
@@ -145,12 +150,17 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
     }
 
     /// Create a parser that parses symbols that match this parser and then another parser, discarding the output of the other parser.
-    pub fn padded_by<U: 'a>(self, other: Parser<'a, T, U, E>) -> Self {
+    pub fn delimited_by<U: 'a>(self, other: Parser<'a, T, U, E>) -> Self {
         Parser::custom(move |tokens| {
             let (a_fail, a) = (self.f)(tokens)?;
             let (b_fail, _) = (other.f)(tokens)?;
             Ok((a_fail.max(b_fail), a))
         })
+    }
+
+    /// Create a parser that parses symbols that match this parser followed by any number of the given symbol.
+    pub fn padded_by(self, padding: impl Borrow<T> + 'a) -> Self where T: PartialEq {
+        self.delimited_by(sym(padding).repeat(..))
     }
 
     /// Create a parser that parses symbols that match this parser or another parser.
@@ -229,17 +239,17 @@ impl<'a, T: Clone + 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, T, E> {
         Self::permit(move |tok| &tok != expected.borrow())
     }
 
-    fn one_of(expected: impl IntoIterator<Item=impl Borrow<T> + 'static>) -> Self where T: PartialEq {
+    fn one_of(expected: impl IntoIterator<Item=impl Borrow<T> + 'a>) -> Self where T: PartialEq {
         let expected = expected.into_iter().collect::<Vec<_>>();
         Self::permit(move |tok| expected.iter().any(|e| &tok == e.borrow()))
     }
 
-    fn none_of(expected: impl IntoIterator<Item=impl Borrow<T> + 'static>) -> Self where T: PartialEq {
+    fn none_of(expected: impl IntoIterator<Item=impl Borrow<T> + 'a>) -> Self where T: PartialEq {
         let expected = expected.into_iter().collect::<Vec<_>>();
         Self::permit(move |tok| expected.iter().all(|e| &tok != e.borrow()))
     }
 
-    fn all_of(expected: impl IntoIterator<Item=impl Borrow<T> + 'static>) -> Parser<'a, T, Vec<T>, E> where T: PartialEq {
+    fn all_of(expected: impl IntoIterator<Item=impl Borrow<T> + 'a>) -> Parser<'a, T, Vec<T>, E> where T: PartialEq {
         let expected = expected.into_iter().collect::<Vec<_>>();
         Parser::custom(move |tokens| {
             let mut outputs = Vec::new();
@@ -317,22 +327,22 @@ fn try_parse<'a, T: Clone + 'a, R, F, E: ParseError<'a, T> + 'a>(tokens: &mut To
 // Utility
 
 /// A parser that accepts the given symbol.
-pub fn sym<'a, T: Clone + 'a + PartialEq, E: ParseError<'a, T> + 'a>(expected: impl Borrow<T> + 'static) -> Parser<'a, T, T, E> {
+pub fn sym<'a, T: Clone + 'a + PartialEq, E: ParseError<'a, T> + 'a>(expected: impl Borrow<T> + 'a) -> Parser<'a, T, T, E> {
     Parser::sym(expected)
 }
 
 /// A parser that accepts any one thing that is not the given symbol.
-pub fn not_sym<'a, T: Clone + 'a + PartialEq, E: ParseError<'a, T> + 'a>(expected: impl Borrow<T> + 'static) -> Parser<'a, T, T, E> {
+pub fn not_sym<'a, T: Clone + 'a + PartialEq, E: ParseError<'a, T> + 'a>(expected: impl Borrow<T> + 'a) -> Parser<'a, T, T, E> {
     Parser::not_sym(expected)
 }
 
 /// A parser that accepts one of the given set of symbols.
-pub fn one_of<'a, T: Clone + 'a + PartialEq, E: ParseError<'a, T> + 'a>(expected: impl IntoIterator<Item=impl Borrow<T> + 'static>) -> Parser<'a, T, T, E> {
+pub fn one_of<'a, T: Clone + 'a + PartialEq, E: ParseError<'a, T> + 'a>(expected: impl IntoIterator<Item=impl Borrow<T> + 'a>) -> Parser<'a, T, T, E> {
     Parser::one_of(expected)
 }
 
 /// A parser that accepts any one symbol that is not within the given set of symbols.
-pub fn none_of<'a, T: Clone + 'a + PartialEq, E: ParseError<'a, T> + 'a>(expected: impl IntoIterator<Item=impl Borrow<T> + 'static>) -> Parser<'a, T, T, E> {
+pub fn none_of<'a, T: Clone + 'a + PartialEq, E: ParseError<'a, T> + 'a>(expected: impl IntoIterator<Item=impl Borrow<T> + 'a>) -> Parser<'a, T, T, E> {
     Parser::none_of(expected)
 }
 
@@ -347,7 +357,7 @@ pub fn permit<'a, T: Clone + 'a, E: ParseError<'a, T> + 'a>(f: impl Fn(T) -> boo
 }
 
 /// A parser that accepts one symbol provided it passes the given test, mapping it to another symbol in the process.
-/// This function is extremely powerful, and in fact it is a supset of `sym`, `not_sym`, `one_of`, `not_one_of` and `permit`.
+/// This function is extremely powerful, and in fact it is a supset of `sym`, `not_sym`, `one_of`, `none_of` and `permit`.
 /// However, this power also makes it fairly awkward to you. You might be better served by one of the aforementioned functions.
 pub fn maybe_map<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a>(f: impl Fn(T) -> Option<O> + 'static) -> Parser<'a, T, O, E> {
     Parser::maybe_map(f)
@@ -370,7 +380,7 @@ pub mod prelude {
         sym,
         not_sym,
         one_of,
-        not_one_of,
+        none_of,
         all_of,
         permit,
         maybe_map,

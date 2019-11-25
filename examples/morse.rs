@@ -30,7 +30,7 @@ fn main() {
             | all_of(b"-.")   - 'N'
             | all_of(b".")    - 'E'
             | all_of(b"-")    - 'T'
-        ) << sym(b' ') * Any
+        ).padded_by(b' ')
     ) * Any % |cs| cs.into_iter().collect::<String>();
 
     println!("{}", morse.parse(<&[_]>::from(b".... . .-.. .-.. --- .-- . .-.. -.-. --- -- . - --- .--. .- .-. --.. .")).unwrap());
