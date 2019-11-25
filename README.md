@@ -7,7 +7,7 @@ Parze is a clean, efficient parser combinator written in Rust.
 
 ## Example
 
-A parser written with Parze that is capable of parsing all valid Brainfuck code into an AST.
+A parser capable of parsing all valid Brainfuck code into an AST.
 
 ```rust
 use parze::prelude::*;

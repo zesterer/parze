@@ -12,7 +12,9 @@
 //!
 //! # Example
 //!
-//! ```rs
+//! A parser capable of parsing all valid Brainfuck code into an AST.
+//!
+//! ```
 //! use parze::prelude::*;
 //!
 //! #[derive(Clone, Debug, PartialEq)]
@@ -34,11 +36,13 @@ extern crate alloc;
 pub mod error;
 pub mod repeat;
 mod fail;
+mod chain;
+mod reduce;
 
 use alloc::rc::Rc;
 use core::{
-    iter,
     slice,
+    iter::{self, FromIterator},
     cell::RefCell,
     borrow::Borrow,
     ops::{Add, BitOr, Mul, Rem, Sub, Shl, Shr, Not},
@@ -47,6 +51,8 @@ use crate::{
     error::{ParseError, DefaultParseError},
     repeat::Repeat,
     fail::{Fail, MayFail},
+    chain::Chain,
+    reduce::{ReduceLeft, ReduceRight},
 };
 
 type TokenIter<'a, T> = iter::Enumerate<iter::Cloned<slice::Iter<'a, T>>>;
@@ -119,10 +125,10 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Not for Parser<'a, T, 
 impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
     // Constructor methods
 
-    /// Create a parser that accepts input symbols according to the given custom rule.
-    ///
-    /// This is rarely useful. Before use, consider whether other functions may better fit your requirements.
-    pub fn custom(f: impl Fn(&mut TokenIter<T>) -> Result<(MayFail<E>, O), Fail<E>> + 'a) -> Self {
+    // Create a parser that accepts input symbols according to the given custom rule.
+    //
+    // This is rarely useful. Before use, consider whether other functions may better fit your requirements.
+    fn custom(f: impl Fn(&mut TokenIter<T>) -> Result<(MayFail<E>, O), Fail<E>> + 'a) -> Self {
         Self { f: Rc::new(move |tokens| attempt(tokens, &f)) }
     }
 
@@ -144,6 +150,16 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
     /// Map the output of this parser to another value with the given function.
     pub fn map<U: 'a>(self, f: impl Fn(O) -> U + 'a) -> Parser<'a, T, U, E> {
         Parser::custom(move |tokens| (self.f)(tokens).map(|(e, o)| (e, f(o))))
+    }
+
+    /// Map the error of this parser to another with the given function.
+    ///
+    /// This may be used to annotate an error with contextual information at some stage of parsing.
+    pub fn map_err<G: ParseError<'a, T> + 'a>(self, f: impl Fn(E) -> G + 'a) -> Parser<'a, T, O, G> {
+        Parser::custom(move |tokens| match (self.f)(tokens) {
+            Ok((fail, output)) => Ok((fail.map_err(&f), output)),
+            Err(fail) => Err(fail.map_err(&f)),
+        })
     }
 
     /// Discard the output of this parser (i.e: create a parser that outputs `()` instead).
@@ -175,6 +191,13 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
         })
     }
 
+    /// Create a parser that parses symbols that match this parser and then another parser.
+    ///
+    /// Unlike `.then`, this method will chain the two parser outputs together as a vector.
+    pub fn chain<U: 'a>(self, other: Parser<'a, T, U, E>) -> Parser<'a, T, O::Chained, E> where O: Chain<U> {
+        self.then(other).map(|(a, b)| a.chain(b))
+    }
+
     /// Create a parser that parses symbols that match this parser and then another parser, discarding the output of this parser.
     pub fn delimiter_for<U: 'a>(self, other: Parser<'a, T, U, E>) -> Parser<'a, T, U, E> {
         Parser::custom(move |tokens| {
@@ -196,6 +219,11 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
     /// Create a parser that parses symbols that match this parser followed by any number of the given symbol.
     pub fn padded_by(self, padding: impl Borrow<T> + 'a) -> Self where T: PartialEq {
         self.delimited_by(sym(padding).repeat(..))
+    }
+
+    /// Create a parser that parses character-like symbols that match this parser followed by any number of whitespace symbols.
+    pub fn padded(self) -> Self where T: Borrow<char> {
+        self.delimited_by(permit(|c: T| c.borrow().is_whitespace()).repeat(..))
     }
 
     /// Create a parser that parses symbols that match this parser or another parser.
@@ -260,6 +288,21 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
 
             Ok((max_err, outputs))
         })
+    }
+
+    /// Create a parser that parses symbols that match this parser and then another parser.
+    pub fn collect<U: FromIterator<O::Item>>(self) -> Parser<'a, T, U, E> where O: IntoIterator {
+        self.map(|output| output.into_iter().collect())
+    }
+
+    /// Create a parser that left-reduces this parser down into another type according to the given reduction function.
+    pub fn reduce_left<A, B>(self, f: impl Fn(B, A) -> A + 'a) -> Parser<'a, T, A, E> where O: ReduceLeft<A, B> {
+        self.map(move |output| output.reduce_left(&f))
+    }
+
+    /// Create a parser that right-reduces this parser down into another type according to the given reduction function.
+    pub fn reduce_right<A, B>(self, f: impl Fn(A, B) -> A + 'a) -> Parser<'a, T, A, E> where O: ReduceRight<A, B> {
+        self.map(move |output| output.reduce_right(&f))
     }
 
     /// Attempt to parse an array-like list of symbols using this parser.
@@ -329,7 +372,7 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Declaration<'a, T, O, 
     }
 
     /// Create a parser that is linked to this declaration.
-    /// If the resultant parser is used before this declaration is defined (see `.define(parser)`) then a panic will occur.
+    /// If the resultant parser is used before this declaration is defined (see `.define`) then a panic will occur.
     pub fn link(&self) -> Parser<'a, T, O, E> {
         let parser = self.parser.clone();
         Parser::custom(move |tokens| ((*parser).borrow().as_ref().expect("Parser was declared but not defined").f)(tokens))
@@ -342,7 +385,7 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Declaration<'a, T, O, 
     }
 }
 
-/// Declare a parser before defining it. A definition can be given later with the `.define(parser)` method.
+/// Declare a parser before defining it. A definition can be given later with the `.define` method.
 ///
 /// This function is generally used to create recursive parsers, along with `call`.
 pub fn declare<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a>() -> Declaration<'a, T, O, E> {

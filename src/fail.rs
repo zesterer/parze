@@ -1,3 +1,6 @@
+use crate::error::ParseError;
+
+#[derive(Debug)]
 pub struct Fail<E>(usize, E);
 
 impl<E> Fail<E> {
@@ -9,14 +12,21 @@ impl<E> Fail<E> {
         self.1
     }
 
-    pub fn max(self, other: impl Into<MayFail<E>>) -> Self {
+    pub fn map_err<G>(self, f: impl Fn(E) -> G) -> Fail<G> {
+        Self(self.0, f(self.1))
+    }
+
+    pub fn max<'a, T: Clone + 'a>(self, other: impl Into<MayFail<E>>) -> Self where E: ParseError<'a, T> {
         match other.into().0 {
+            Some((idx, err)) if idx == self.0 => Self(idx, err.combine(self.1)),
             Some((idx, err)) if idx > self.0 => Self(idx, err),
+            Some((idx, _)) if idx < self.0 => Self(self.0, self.1),
             _ => self,
         }
     }
 }
 
+#[derive(Debug)]
 pub struct MayFail<E>(Option<(usize, E)>);
 
 impl<E> MayFail<E> {
@@ -24,10 +34,18 @@ impl<E> MayFail<E> {
         Self(None)
     }
 
-    pub fn max(self, other: impl Into<MayFail<E>>) -> Self {
+    pub fn map_err<G>(self, f: impl Fn(E) -> G) -> MayFail<G> {
+        MayFail(self.0.map(|(idx, e)| (idx, f(e))))
+    }
+
+    pub fn max<'a, T: Clone + 'a>(self, other: impl Into<MayFail<E>>) -> Self where E: ParseError<'a, T> {
         match (self.0, other.into().0) {
+            (Some((a_idx, a)), Some((b_idx, b)))
+                if a_idx == b_idx => Self(Some((a_idx, a.combine(b)))),
+            (Some((a_idx, _)), Some((b_idx, b)))
+                if a_idx > b_idx => Self(Some((b_idx, b))),
             (Some((a_idx, a)), Some((b_idx, _)))
-                if a_idx >= b_idx => Self(Some((a_idx, a))),
+                if a_idx < b_idx => Self(Some((a_idx, a))),
             (Some((a_idx, a)), _) => Self(Some((a_idx, a))),
             (_, Some((b_idx, b))) => Self(Some((b_idx, b))),
             _ => Self(None),

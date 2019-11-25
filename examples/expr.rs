@@ -27,27 +27,38 @@ impl Expr {
 
 fn main() {
     let expr: Parser<_, _> = recursive(|expr| {
-        let number = (one_of("0123456789".chars()) * (1..)) % |chars| Expr::Literal(chars.into_iter().collect::<String>().parse().unwrap());
+        // Accepts any integer
+        let number = (one_of("0123456789".chars()) * (1..)).collect::<String>() % |s| Expr::Literal(s.parse().unwrap());
 
-        let atom = number.padded_by(' ') | sym('(') >> expr << sym(')').padded_by(' ');
+        // An integer or a parenthesised expression
+        let atom = (number | sym('(') >> expr << sym(')')).padded();
 
-        let unary = (sym('-').padded_by(' ') * Any + atom) % |(ops, expr)| ops.into_iter().fold(expr, |expr, _| Expr::Neg(expr.into()));
+        // Any number of unary operators, then an atom
+        let unary = (sym('-').padded() * Any + atom)
+            .reduce_left(|_, e| Expr::Neg(e.into()));
 
-        let product = (unary.clone() + (one_of(&['*', '/', '%']).padded_by(' ') + unary) * Any) % |(head, tail)| tail.into_iter().fold(head, |a, (op, b)| match op {
-            '*' => Expr::Mul(a.into(), b.into()),
-            '/' => Expr::Div(a.into(), b.into()),
-            '%' => Expr::Rem(a.into(), b.into()),
-            _ => unreachable!(),
-        });
+        // A unary, then any number of product operations
+        let product = (unary.clone() + (one_of(&['*', '/', '%']).padded() + unary) * Any)
+            .reduce_right(|a, (op, b)| match op {
+                '*' => Expr::Mul(a.into(), b.into()),
+                '/' => Expr::Div(a.into(), b.into()),
+                '%' => Expr::Rem(a.into(), b.into()),
+                _ => unreachable!(),
+            });
 
-        let sum = (product.clone() + (one_of(&['+', '-']).padded_by(' ') + product) * Any) % |(head, tail)| tail.into_iter().fold(head, |a, (op, b)| match op {
-            '+' => Expr::Add(a.into(), b.into()),
-            '-' => Expr::Sub(a.into(), b.into()),
-            _ => unreachable!(),
-        });
+        // A product, then any number of sum operations
+        let sum = (product.clone() + (one_of(&['+', '-']).padded() + product) * Any)
+            .reduce_right(|a, (op, b)| match op {
+                '+' => Expr::Add(a.into(), b.into()),
+                '-' => Expr::Sub(a.into(), b.into()),
+                _ => unreachable!(),
+            });
 
         sym(' ') * Any >> sum
     });
 
-    println!("{}", expr.parse("14 + 3 * (2 + 4) + -1".chars().collect::<Vec<_>>()).unwrap().eval());
+    assert_eq!(
+        expr.parse("14 + 3 / 1 * (2 + 4) + -1".chars().collect::<Vec<_>>()).unwrap().eval(),
+        31,
+    );
 }
