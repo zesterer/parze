@@ -5,6 +5,6 @@ description = "A clean, efficient parser combinator"
 authors = ["Joshua Barretto <joshua.s.barretto@gmail.com>"]
 license = "MIT"
 edition = "2018"
-keywords = ["parser", "combinator", "parse", "token", "symbol", "no_std"]
+keywords = ["parse", "token", "symbol", "no_std"]
 
 [dependencies]
