@@ -62,7 +62,7 @@ type TokenIter<'a, T> = iter::Enumerate<iter::Cloned<slice::Iter<'a, T>>>;
 /// A type that represents a rule that may be used to parse a list of symbols.
 ///
 /// Parsers may be combined and manipulated in various ways to create new parsers.
-pub struct Parser<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a = DefaultParseError<T>> {
+pub struct Parser<'a, T: Clone + 'a, O: 'a = T, E: ParseError<'a, T> + 'a = DefaultParseError<T>> {
     f: Rc<dyn Fn(&mut TokenIter<T>) -> Result<(MayFail<E>, O), Fail<E>> + 'a>,
 }
 
@@ -145,6 +145,11 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
 
     fn call(f: impl Fn() -> Self + 'a) -> Self {
         Self::custom(move |tokens| (f().f)(tokens))
+    }
+
+    // Undocumented
+    pub fn link(&self) -> Self {
+        self.clone()
     }
 
     // Combinator methods
@@ -512,19 +517,122 @@ pub mod prelude {
         permit,
         maybe_map,
         call,
+        rule,
+        parsers,
     };
 }
 
-/*
-// I wish for this syntax...
-parsers! {
-    bf =
-        | '+' => Token::Add
-        | '-' => Token::Sub
-        | '<' => Token::Left
-        | '>' => Token::Right
-        | ',' => Token::In
-        | '.' => Token::Out
-        | ('[' > bf < ']') => |ts| Token::Loop(ts)
-};
-*/
+#[macro_export]
+macro_rules! parze_error {
+    () => {};
+}
+
+#[macro_export]
+macro_rules! rule {
+    // Atoms
+
+    ( $x:literal ) => {
+        $crate::sym($x)
+    };
+
+    ( $x:ident ) => {
+        ($x).link()
+    };
+
+    ( $x:path ) => {
+        ($x)
+    };
+
+    ( { $($inner:tt)* } ) => {
+        { $($inner)* }
+    };
+
+    ( ( $($inner:tt)+ ) ) => {
+        ($crate::rule!($($inner)*))
+    };
+
+    // Unary
+
+    ( | $($tail:tt)+ ) => { // Ignore
+        $crate::rule!($($tail)*)
+    };
+
+    // Operators
+
+    ( $x:tt &- $($tail:tt)+ ) => {
+        ($crate::rule!($x)).delimiter_for($crate::rule!($($tail)*))
+    };
+
+    ( $x:tt -& $($tail:tt)+ ) => {
+        ($crate::rule!($x)).delimited_by($crate::rule!($($tail)*))
+    };
+
+    ( $x:tt & $($tail:tt)+ ) => {
+        ($crate::rule!($x)).then($crate::rule!($($tail)*))
+    };
+
+    ( $x:tt | $($tail:tt)+ ) => {
+        ($crate::rule!($x)).or($crate::rule!($($tail)*))
+    };
+
+    // Repetition
+
+    ( $x:tt * ) => {
+        ($crate::rule!($x)).repeat(..)
+    };
+
+    ( $x:tt + ) => {
+        ($crate::rule!($x)).repeat(1..)
+    };
+
+    ( $x:tt ? ) => {
+        ($crate::rule!($x)).or_not()
+    };
+
+    // Mapping and methods
+
+    ( $x:tt -> $($tail:tt)+ ) => {
+        ($crate::rule!($x)).to($crate::rule!($($tail)*))
+    };
+
+    ( $x:tt => $($tail:tt)+ ) => {
+        ($crate::rule!($x)).map($crate::rule!($($tail)*))
+    };
+
+    ( $x:tt . $method:ident ( $($args:tt)* ) $($tail:tt)* ) => {
+        $crate::rule!({ ($crate::rule!($x)).$method($($args)*) } $($tail)*)
+    };
+
+    // Error
+
+    ( $($tail:tt)* ) => {
+        $crate::parze_error!($($tail)*);
+    };
+}
+
+#[macro_export]
+macro_rules! parsers {
+    ( @NAMES ) => {};
+    ( @NAMES $name:ident : $kind:ty = { $($rule:tt)* } $($tail:tt)* ) => {
+        let $name = $crate::declare();
+        $crate::parsers!(@NAMES $($tail)*);
+    };
+    ( @NAMES $($tail:tt)* ) => {
+        $crate::parze_error!($($tail)*);
+    };
+
+    ( @DEFINITIONS ) => {};
+    ( @DEFINITIONS $name:ident : $kind:ty = { $($rule:tt)* } $($tail:tt)* ) => {
+        let __tmp = $crate::rule!($($rule)*);
+        let $name : $kind = ($name).define(__tmp);
+        $crate::parsers!(@DEFINITIONS $($tail)*);
+    };
+    ( @DEFINITIONS $($tail:tt)* ) => {
+        $crate::parze_error!($($tail)*);
+    };
+
+    ( $($tail:tt)* ) => {
+        $crate::parsers!(@NAMES $($tail)*);
+        $crate::parsers!(@DEFINITIONS $($tail)*);
+    };
+}
