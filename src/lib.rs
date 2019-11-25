@@ -113,7 +113,7 @@ impl<'a, T: Clone + 'a, O: 'a, U: 'a, E: ParseError<'a, T> + 'a> Shr<Parser<'a, 
 
 impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Not for Parser<'a, T, O, E> {
     type Output = Parser<'a, T, Option<O>, E>;
-    fn not(self) -> Self::Output { self.or_nothing() }
+    fn not(self) -> Self::Output { self.or_not() }
 }
 
 impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
@@ -148,16 +148,16 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
 
     /// Discard the output of this parser (i.e: create a parser that outputs `()` instead).
     pub fn discard(self) -> Parser<'a, T, (), E> {
-        Parser::custom(move |tokens| (self.f)(tokens).map(|(e, _)| (e, ())))
+        self.map(|_| ())
     }
 
     /// Map all outputs of this parser to the given value.
     pub fn to<U: Clone + 'a>(self, to: U) -> Parser<'a, T, U, E> {
-        Parser::custom(move |tokens| (self.f)(tokens).map(|(e, _)| (e, to.clone())))
+        self.map(move |_| to.clone())
     }
 
-    /// Create a parser that parses symbols that match this parser or not at all.
-    pub fn or_nothing(self) -> Parser<'a, T, Option<O>, E> {
+    /// Create a parser that optionally parses symbols that match this parser.
+    pub fn or_not(self) -> Parser<'a, T, Option<O>, E> {
         Parser::custom(move |tokens| {
             match (self.f)(tokens) {
                 Ok((fail, output)) => Ok((fail, Some(output))),
@@ -222,7 +222,7 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
 
     /// Create a parser that parses symbols that match this parser or another fallback parser, prioritising errors from this parser.
     ///
-    /// This method is 'short-circuiting': if this parse succeeds, the fallback parser won't even be attempted.
+    /// This method is 'short-circuiting': if this parser succeeds, the fallback parser won't even be invoked.
     /// This means that emitted errors may not include information from the fallback parser.
     pub fn or_fallback(self, other: Parser<'a, T, O, E>) -> Self {
         Parser::custom(move |tokens| {
@@ -410,7 +410,7 @@ pub fn permit<'a, T: Clone + 'a, E: ParseError<'a, T> + 'a>(f: impl Fn(T) -> boo
 /// A parser that accepts one symbol provided it passes the given test, mapping it to another symbol in the process.
 ///
 /// This function is extremely powerful, and is actually a superset of several other parser functions defined in this crate.
-/// However, this power also makes it fairly awkward to you. You might be better served by one of the aforementioned functions.
+/// However, this power also makes it fairly awkward to use. You might be better served by another function.
 pub fn maybe_map<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a>(f: impl Fn(T) -> Option<O> + 'static) -> Parser<'a, T, O, E> {
     Parser::maybe_map(f)
 }
