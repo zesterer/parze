@@ -1,11 +1,17 @@
 use std::ops::{Range, RangeFull, RangeFrom, RangeTo};
 
+/// A type that represents possible pattern repetitions.
 #[derive(Copy, Clone)]
 pub enum Repeat {
+    /// The pattern may be seen any number of times (including not at all).
     Any,
+    /// The pattern must be seen a specific number of times.
     Exactly(usize),
+    /// The pattern must be seen at least a specific number of times.
     AtLeast(usize),
+    /// The pattern must be seen at most a specific number of times.
     AtMost(usize),
+    /// The pattern must be seen at least a specific number of times and at most a specific number of times.
     Range(usize, usize),
 }
 
@@ -40,6 +46,7 @@ impl From<RangeTo<usize>> for Repeat {
 }
 
 impl Repeat {
+    /// Returns true if this repetition permits the given number of repetitions.
     pub fn contains(self, m: usize) -> bool {
         match self {
             Repeat::Any => true,
