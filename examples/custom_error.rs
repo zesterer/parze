@@ -47,8 +47,8 @@ fn main() {
         | expect('<') - Instr::Left
         | expect('>') - Instr::Right
         | expect(',') - Instr::In
-        | ((expect('[') >> bf << expect(']')) % |ts| Instr::Loop(ts))
         | expect('.') - Instr::Out
+        | (expect('[') >> bf << expect(']')) % |ts| Instr::Loop(ts)
     ) * Any);
 
     println!("{:?}", bf.parse("[+++".chars().collect::<Vec<_>>()));
