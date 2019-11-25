@@ -6,7 +6,7 @@ Parze is a clean, efficient parser combinator written in Rust.
 
 A parser capable of parsing all valid Brainfuck code into an AST.
 
-```rs
+```rust
 use parze::prelude::*;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -25,7 +25,7 @@ let bf: Parser<_, _> = recursive(|bf| (
     | sym('-') - Instr::Sub
     | sym('<') - Instr::Left
     | sym('>') - Instr::Right
-	| sym(',') - Instr::In
+    | sym(',') - Instr::In
     | sym('.') - Instr::Out
     | (sym('[') >> bf << sym(']')) % |ts| Instr::Loop(ts)
 ) * Any);
