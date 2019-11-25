@@ -388,14 +388,16 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Declaration<'a, T, O, 
     /// Create a parser that is linked to this declaration.
     /// If the resultant parser is used before this declaration is defined (see `.define`) then a panic will occur.
     pub fn link(&self) -> Parser<'a, T, O, E> {
-        let parser = self.parser.clone();
-        Parser::custom(move |tokens| ((*parser).borrow().as_ref().expect("Parser was declared but not defined").f)(tokens))
+        let parser = Rc::downgrade(&self.parser);
+        Parser::custom(move |tokens| {
+            ((*parser.upgrade().expect("Parser was dropped")).borrow().as_ref().expect("Parser was declared but not defined").f)(tokens)
+        })
     }
 
     /// Provider a parser definition for this declaration, thereby sealing it as a well-defined parser.
     pub fn define(self, parser: Parser<'a, T, O, E>) -> Parser<'a, T, O, E> {
         *self.parser.borrow_mut() = Some(parser);
-        self.link()
+        Parser::custom(move |tokens| ((*self.parser).borrow().as_ref().unwrap().f)(tokens))
     }
 }
 
