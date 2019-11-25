@@ -1,4 +1,4 @@
-use std::ops::{Range, RangeFull, RangeFrom, RangeTo};
+use core::ops::{Range, RangeFull, RangeFrom, RangeTo};
 
 /// A type that represents possible pattern repetitions.
 #[derive(Copy, Clone)]

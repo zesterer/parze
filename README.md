@@ -13,15 +13,7 @@ A parser written with Parze that is capable of parsing all valid Brainfuck code 
 use parze::prelude::*;
 
 #[derive(Clone, Debug, PartialEq)]
-enum Instr {
-    Add,
-    Sub,
-    Left,
-    Right,
-    In,
-    Out,
-    Loop(Vec<Instr>),
-}
+enum Instr { Add, Sub, Left, Right, In, Out, Loop(Vec<Instr>) }
 
 let bf: Parser<_, _> = recursive(|bf| (
       sym('+') - Instr::Add
@@ -33,6 +25,16 @@ let bf: Parser<_, _> = recursive(|bf| (
     | (sym('[') >> bf << sym(']')) % |ts| Instr::Loop(ts)
 ) * Any);
 ```
+
+## Features
+
+- [x] All the usual parser combinator operations
+- [x] Operator overloading for simpler parser declaration
+- [x] Support for recursive parser definitions
+- [x] Custom error types - define your own!
+- [x] Prioritised / merged failure for more useful errors
+- [x] No dependencies - fast compilation!
+- [x] `no_std` support
 
 ## Why Parze?
 

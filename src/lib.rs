@@ -1,11 +1,44 @@
-#![feature(trait_alias)]
+//! Parze is a clean, efficient parser combinator written in Rust.
+//!
+//! # Features
+//!
+//! - All the usual parser combinator operations
+//! - Operator overloading for simpler parser declaration
+//! - Support for recursive parser definitions
+//! - Custom error types - define your own!
+//! - Prioritised / merged failure for more useful errors
+//! - No dependencies - fast compilation!
+//! - `no_std` support
+//!
+//! # Example
+//!
+//! ```rs
+//! use parze::prelude::*;
+//!
+//! #[derive(Clone, Debug, PartialEq)]
+//! enum Instr { Add, Sub, Left, Right, In, Out, Loop(Vec<Instr>) }
+//!
+//! let bf: Parser<_, _> = recursive(|bf| (
+//!       sym('+') - Instr::Add
+//!     | sym('-') - Instr::Sub
+//!     | sym('<') - Instr::Left
+//!     | sym('>') - Instr::Right
+//!     | sym(',') - Instr::In
+//!     | sym('.') - Instr::Out
+//!     | (sym('[') >> bf << sym(']')) % |ts| Instr::Loop(ts)
+//! ) * Any);
+//! ```
+
+extern crate alloc;
 
 pub mod error;
 pub mod repeat;
 mod fail;
 
-use std::{
-    rc::Rc,
+use alloc::rc::Rc;
+use core::{
+    iter,
+    slice,
     cell::RefCell,
     borrow::Borrow,
     ops::{Add, BitOr, Mul, Rem, Sub, Shl, Shr, Not},
@@ -16,9 +49,10 @@ use crate::{
     fail::{Fail, MayFail},
 };
 
-type TokenIter<'a, T> = std::iter::Enumerate<std::iter::Cloned<std::slice::Iter<'a, T>>>;
+type TokenIter<'a, T> = iter::Enumerate<iter::Cloned<slice::Iter<'a, T>>>;
 
 /// A type that represents a rule that may be used to parse a list of symbols.
+///
 /// Parsers may be combined and manipulated in various ways to create new parsers.
 pub struct Parser<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a = DefaultParseError<T>> {
     f: Rc<dyn Fn(&mut TokenIter<T>) -> Result<(MayFail<E>, O), Fail<E>> + 'a>,
@@ -86,6 +120,7 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
     // Constructor methods
 
     /// Create a parser that accepts input symbols according to the given custom rule.
+    ///
     /// This is rarely useful. Before use, consider whether other functions may better fit your requirements.
     pub fn custom(f: impl Fn(&mut TokenIter<T>) -> Result<(MayFail<E>, O), Fail<E>> + 'a) -> Self {
         Self { f: Rc::new(move |tokens| attempt(tokens, &f)) }
@@ -167,22 +202,35 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
     pub fn or(self, other: Parser<'a, T, O, E>) -> Self {
         Parser::custom(move |tokens| {
             let a = (self.f)(tokens);
-            //let mut b_tokens = tokens.clone();
-            //let b = (other.f)(&mut b_tokens);
+            let mut b_tokens = tokens.clone();
+            let b = (other.f)(&mut b_tokens);
             match a {
-                Ok((a_fail, a)) => Ok((a_fail, a)),
-                /*
                 Ok((a_fail, a)) => match b {
                     Ok((b_fail, _)) => Ok((a_fail.max(b_fail), a)),
                     Err(b_fail) => Ok((a_fail.max(b_fail), a)),
                 },
-                */
-                Err(a_fail) => match (other.f)(tokens) {
-                //Err(a_fail) => match b {
+                Err(a_fail) => match b {
                     Ok((b_fail, b)) => {
-                        //*tokens = b_tokens;
+                        *tokens = b_tokens;
                         Ok((b_fail.max(a_fail), b))
                     },
+                    Err(b_fail) => Err(a_fail.max(b_fail)),
+                },
+            }
+        })
+    }
+
+    /// Create a parser that parses symbols that match this parser or another fallback parser, prioritising errors from this parser.
+    ///
+    /// This method is 'short-circuiting': if this parse succeeds, the fallback parser won't even be attempted.
+    /// This means that emitted errors may not include information from the fallback parser.
+    pub fn or_fallback(self, other: Parser<'a, T, O, E>) -> Self {
+        Parser::custom(move |tokens| {
+            let a = (self.f)(tokens);
+            match a {
+                Ok((a_fail, a)) => Ok((a_fail, a)),
+                Err(a_fail) => match (other.f)(tokens) {
+                    Ok((b_fail, b)) => Ok((b_fail.max(a_fail), b)),
                     Err(b_fail) => Err(a_fail.max(b_fail)),
                 },
             }
@@ -268,6 +316,7 @@ impl<'a, T: Clone + 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, T, E> {
 // Declaration
 
 /// A type used to separate the declaration and definition of a parser such that it may be defined in terms of itself.
+///
 /// This type is the primary route through which recursive parsers are defined, although `call(f)` may also be used.
 pub struct Declaration<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> = DefaultParseError<T>> {
     parser: Rc<RefCell<Option<Parser<'a, T, O, E>>>>,
@@ -294,12 +343,14 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Declaration<'a, T, O, 
 }
 
 /// Declare a parser before defining it. A definition can be given later with the `.define(parser)` method.
+///
 /// This function is generally used to create recursive parsers, along with `call`.
 pub fn declare<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a>() -> Declaration<'a, T, O, E> {
     Declaration::new()
 }
 
 /// A wrapper function for recursive parser declarations.
+///
 /// This function uses `Declaration` internally.
 pub fn recursive<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a>(f: impl FnOnce(Parser<'a, T, O, E>) -> Parser<'a, T, O, E> + 'a) -> Parser<'a, T, O, E> {
     let p = Declaration::new();
@@ -357,13 +408,15 @@ pub fn permit<'a, T: Clone + 'a, E: ParseError<'a, T> + 'a>(f: impl Fn(T) -> boo
 }
 
 /// A parser that accepts one symbol provided it passes the given test, mapping it to another symbol in the process.
-/// This function is extremely powerful, and in fact it is a supset of `sym`, `not_sym`, `one_of`, `none_of` and `permit`.
+///
+/// This function is extremely powerful, and is actually a superset of several other parser functions defined in this crate.
 /// However, this power also makes it fairly awkward to you. You might be better served by one of the aforementioned functions.
 pub fn maybe_map<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a>(f: impl Fn(T) -> Option<O> + 'static) -> Parser<'a, T, O, E> {
     Parser::maybe_map(f)
 }
 
 /// A parser that invokes another parser, as generated by the given function.
+///
 /// This function is generally used to create recursive parsers, along with `Declaration`.
 pub fn call<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a>(f: impl Fn() -> Parser<'a, T, O, E> + 'a) -> Parser<'a, T, O, E> {
     Parser::call(f)
