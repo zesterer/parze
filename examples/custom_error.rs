@@ -49,7 +49,7 @@ fn main() {
             | { expect('>') } -> { Instr::Right }
             | { expect(',') } -> { Instr::In }
             | { expect('.') } -> { Instr::Out }
-            | { expect('[') } -& bf &- { expect(']') } => |i| { Instr::Loop(i) }
+            | { expect('[') } -& bf &- { expect(']') } => { |i| Instr::Loop(i) }
             )*
         }
     }

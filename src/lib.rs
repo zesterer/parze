@@ -28,7 +28,7 @@
 //!         | '>' -> { Instr::Right }
 //!         | ',' -> { Instr::In }
 //!         | '.' -> { Instr::Out }
-//!         | '[' -& bf &- ']' => |ts| { Instr::Loop(ts) }
+//!         | '[' -& bf &- ']' => { |ts| Instr::Loop(ts) }
 //!         ) *
 //!     }
 //! }
@@ -532,6 +532,26 @@ macro_rules! parze_error {
     () => {};
 }
 
+/// A macro to define parser rules.
+///
+/// # Operators
+///
+/// Note that `|` has a lower precedence than all other operators
+///
+/// | Syntax     | Name          | Description                           |
+/// |------------|---------------|---------------------------------------|
+/// | x & y      | then          | Equivalent to `x.then(y)`             |
+/// | x \| y     | or            | Equivalent to `x.or(y)`               |
+/// | x *        | any           | Equivalent to `x.repeat(..)`          |
+/// | x +        | at least one  | Equivalent to `x.repeat(1..)`         |
+/// | x ?        | optional      | Equivalent to `x.or_not()`            |
+/// | x -& y     | delimiter for | Equivalent to `x.delimiter_for(y)`    |
+/// | x &- y     | delimited by  | Equivalent to `x.delimited_by(y)`     |
+/// | x *= N     | repeat        | Equivalent to `x.repeat(N)`           |
+/// | x -> Y     | to            | Equivalent to `x.to(y)`               |
+/// | x => F     | map           | Equivalent to `x.map(F)`              |
+/// | \[ X \]    | all of        | Equivalent to `all_of(X)`             |
+/// | { X }      | expr          | Considers `X` to be a Rust expression |
 #[macro_export]
 macro_rules! rule {
     // Atoms
@@ -552,8 +572,8 @@ macro_rules! rule {
     ( $a:tt -> $b:tt $($tail:tt)* ) => {
         $crate::rule!({ ($crate::rule!($a)).to($crate::rule!(@AS_EXPR $b)) } $($tail)*)
     };
-    ( $a:tt => | $kind:pat | $b:tt $($tail:tt)* ) => {
-        $crate::rule!({ ($crate::rule!($a)).map(|$kind| $crate::rule!(@AS_EXPR $b)) } $($tail)*)
+    ( $a:tt => $b:tt $($tail:tt)* ) => {
+        $crate::rule!({ ($crate::rule!($a)).map($crate::rule!(@AS_EXPR $b)) } $($tail)*)
     };
     ( $a:tt . $method:ident ( $($args:tt)* ) $($tail:tt)* ) => {
         $crate::rule!({ ($crate::rule!($a)).$method($($args)*) } $($tail)*)
@@ -608,6 +628,25 @@ macro_rules! rule {
     };
 }
 
+/// A macro to define recursive parsers.
+///
+/// Parsers defined by this macro may be arbitrarily self-referential, unlike `rule!`.
+///
+/// # Example
+///
+/// ```
+/// use parze::prelude::*;
+///
+/// parsers! {
+///     foo = {
+///         '!' | bar
+///     }
+
+///     bar: Parser<_, _> = {
+///         '(' -& foo &- ')'
+///     }
+/// }
+/// ```
 #[macro_export]
 macro_rules! parsers {
     ( @NAMES ) => {};

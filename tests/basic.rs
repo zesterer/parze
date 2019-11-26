@@ -21,7 +21,7 @@ fn brainfuck() {
             | '>' -> { Instr::Right }
             | ',' -> { Instr::In }
             | '.' -> { Instr::Out }
-            | '[' -& bf &- ']' => |i| { Instr::Loop(i) }
+            | '[' -& bf &- ']' => { |i| Instr::Loop(i) }
             )*
         }
     }

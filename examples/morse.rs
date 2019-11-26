@@ -1,7 +1,6 @@
 use parze::prelude::*;
 
 fn main() {
-    // Define a parser for morse code
     let morse: Parser<_, _> = rule!{
         (
             ( [b"-..."] -> 'B'
@@ -31,7 +30,7 @@ fn main() {
             | [b"."]    -> 'E'
             | [b"-"]    -> 'T'
             ).padded_by(b' ')
-        ) * => |cs| { cs.into_iter().collect::<String>() }
+        ) * => { |cs| cs.into_iter().collect::<String>() }
     };
 
     println!("{}", morse.parse(<&[_]>::from(b".... . .-.. .-.. --- .-- . .-.. -.-. --- -- . - --- .--. .- .-. --.. .")).unwrap());

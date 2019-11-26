@@ -25,7 +25,7 @@ fn simple() {
 
         repeater_4: Parser<_, _> = { '+'.repeat(4) }
 
-        mapper: Parser<_, _> = { '+' => |c| { format!("{}", c) } }
+        mapper: Parser<_, _> = { '+' => { |c| format!("{}", c) } }
 
         bf: Parser<_, _> = {
             ( '+' -> { Instr::Add }
@@ -34,14 +34,14 @@ fn simple() {
             | '>' -> { Instr::Right }
             | ',' -> { Instr::In }
             | '.' -> { Instr::Out }
-            | '[' -& bf &- ']' => |i| { Instr::Loop(i) }
+            | '[' -& bf &- ']' => { |i| Instr::Loop(i) }
             )*
         }
     }
 
     let foo: Parser<_, _> = rule! {
-        | '0' & '1' => |_| ('!', '?')
-        | 'a' & (('b' *= ..) => |_| '!')
+        | '0' & '1' => { |_| ('!', '?') }
+        | 'a' & (('b' *= ..) => { |_| '!' })
         | 'a' & ('b' *) -> ('!', '@')
     };
 }

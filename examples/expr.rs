@@ -28,7 +28,7 @@ impl Expr {
 fn main() {
     parsers! {
         number = {
-            { one_of("0123456789".chars()) }+ => |s| { Expr::Literal(s.into_iter().collect::<String>().parse().unwrap()) }
+            { one_of("0123456789".chars()) }+ => { |s| Expr::Literal(s.into_iter().collect::<String>().parse().unwrap()) }
         }
 
         atom = {
