@@ -3,8 +3,13 @@ name = "parze"
 version = "0.4.0"
 description = "A clean, efficient parser combinator"
 authors = ["Joshua Barretto <joshua.s.barretto@gmail.com>"]
+documentation = "https://docs.rs/parze"
+repository = "https://www.github.com/zesterer/parze"
+homepage = "https://www.github.com/zesterer/parze"
+keywords = ["parse", "token", "symbol", "no_std"]
+categories = ["parsing", "no-std"]
+readme = "README.md"
 license = "MIT"
 edition = "2018"
-keywords = ["parse", "token", "symbol", "no_std"]
 
 [dependencies]
