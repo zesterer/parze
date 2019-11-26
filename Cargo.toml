@@ -1,6 +1,6 @@
 [package]
 name = "parze"
-version = "0.4.1"
+version = "0.4.2"
 description = "A clean, efficient parser combinator"
 authors = ["Joshua Barretto <joshua.s.barretto@gmail.com>"]
 documentation = "https://docs.rs/parze"
