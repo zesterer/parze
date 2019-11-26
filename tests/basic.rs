@@ -13,15 +13,18 @@ fn brainfuck() {
         Loop(Vec<Instr>),
     }
 
-    let bf: Parser<_, _> = recursive(|bf| (
-          sym('+') - Instr::Add
-        | sym('-') - Instr::Sub
-        | sym('<') - Instr::Left
-        | sym('>') - Instr::Right
-        | sym(',') - Instr::In
-        | sym('.') - Instr::Out
-        | (sym('[') >> bf << sym(']')) % |ts| Instr::Loop(ts)
-    ) * Any);
+    parsers! {
+        bf: Parser<_, _> = {
+            ( '+' -> { Instr::Add }
+            | '-' -> { Instr::Sub }
+            | '<' -> { Instr::Left }
+            | '>' -> { Instr::Right }
+            | ',' -> { Instr::In }
+            | '.' -> { Instr::Out }
+            | '[' -& bf &- ']' => |i| { Instr::Loop(i) }
+            )*
+        }
+    }
 
     let program_src = "++++[->++++<]>[->++++<]>.";
 

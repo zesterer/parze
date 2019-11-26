@@ -26,36 +26,38 @@ impl Expr {
 }
 
 fn main() {
-    let expr: Parser<_, _> = recursive(|expr| {
-        // Accepts any integer
-        let number = (one_of("0123456789".chars()) * (1..)).collect::<String>() % |s| Expr::Literal(s.parse().unwrap());
+    parsers! {
+        number = {
+            { one_of("0123456789".chars()) }+ => |s| { Expr::Literal(s.into_iter().collect::<String>().parse().unwrap()) }
+        }
 
-        // An integer or a parenthesised expression
-        let atom = (number | sym('(') >> expr << sym(')')).padded();
+        atom = {
+            ( number | '(' -& expr &- ')').padded()
+        }
 
-        // Any number of unary operators, then an atom
-        let unary = (sym('-').padded() * Any + atom)
-            .reduce_left(|_, e| Expr::Neg(e.into()));
+        unary = {
+            ('-'.padded()* & atom).reduce_left(|_, e| Expr::Neg(e.into()))
+        }
 
-        // A unary, then any number of product operations
-        let product = (unary.clone() + (one_of(&['*', '/', '%']).padded() + unary) * Any)
-            .reduce_right(|a, (op, b)| match op {
+        product = {
+            (unary & ((('*' | '/' | '%').padded() & unary)*)).reduce_right(|a, (op, b)| match op {
                 '*' => Expr::Mul(a.into(), b.into()),
                 '/' => Expr::Div(a.into(), b.into()),
                 '%' => Expr::Rem(a.into(), b.into()),
                 _ => unreachable!(),
-            });
+            })
+        }
 
-        // A product, then any number of sum operations
-        let sum = (product.clone() + (one_of(&['+', '-']).padded() + product) * Any)
-            .reduce_right(|a, (op, b)| match op {
+        sum = {
+            (product & ((('+' | '-').padded() & product)*)).reduce_right(|a, (op, b)| match op {
                 '+' => Expr::Add(a.into(), b.into()),
                 '-' => Expr::Sub(a.into(), b.into()),
                 _ => unreachable!(),
-            });
+            })
+        }
 
-        sym(' ') * Any >> sum
-    });
+        expr: Parser<_, _> = { ' '* -& sum }
+    }
 
     assert_eq!(
         expr.parse("14 + 3 / 1 * (2 + 4) + -1".chars().collect::<Vec<_>>()).unwrap().eval(),

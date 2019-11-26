@@ -25,17 +25,23 @@ fn simple() {
 
         repeater_4: Parser<_, _> = { '+'.repeat(4) }
 
-        mapper: Parser<_, _> = { '+' => { |c| format!("{}", c) } }
+        mapper: Parser<_, _> = { '+' => |c| { format!("{}", c) } }
 
         bf: Parser<_, _> = {
-            ( ('+' -> Instr::Add)
-            | ('-' -> Instr::Sub)
-            | ('<' -> Instr::Left)
-            | ('>' -> Instr::Right)
-            | (',' -> Instr::In)
-            | ('.' -> Instr::Out)
-            | (('[' &- bf -& ']') => { |i| Instr::Loop(i) })
-            ) *
+            ( '+' -> { Instr::Add }
+            | '-' -> { Instr::Sub }
+            | '<' -> { Instr::Left }
+            | '>' -> { Instr::Right }
+            | ',' -> { Instr::In }
+            | '.' -> { Instr::Out }
+            | '[' -& bf &- ']' => |i| { Instr::Loop(i) }
+            )*
         }
     }
+
+    let foo: Parser<_, _> = rule! {
+        | '0' & '1' => |_| ('!', '?')
+        | 'a' & (('b' *= ..) => |_| '!')
+        | 'a' & ('b' *) -> ('!', '@')
+    };
 }

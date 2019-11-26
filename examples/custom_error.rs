@@ -41,15 +41,18 @@ fn expect<'a>(c: char) -> Parser<'a, char, (), BrainfuckError> {
 }
 
 fn main() {
-    let bf: Parser<_, _, BrainfuckError> = recursive(|bf| (
-          expect('+') - Instr::Add
-        | expect('-') - Instr::Sub
-        | expect('<') - Instr::Left
-        | expect('>') - Instr::Right
-        | expect(',') - Instr::In
-        | expect('.') - Instr::Out
-        | (expect('[') >> bf << expect(']')) % |ts| Instr::Loop(ts)
-    ) * Any);
+    parsers! {
+        bf: Parser<_, _, BrainfuckError> = {
+            ( { expect('+') } -> { Instr::Add }
+            | { expect('-') } -> { Instr::Sub }
+            | { expect('<') } -> { Instr::Left }
+            | { expect('>') } -> { Instr::Right }
+            | { expect(',') } -> { Instr::In }
+            | { expect('.') } -> { Instr::Out }
+            | { expect('[') } -& bf &- { expect(']') } => |i| { Instr::Loop(i) }
+            )*
+        }
+    }
 
     println!("{:?}", bf.parse("[+++".chars().collect::<Vec<_>>()));
 }

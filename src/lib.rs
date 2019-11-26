@@ -3,7 +3,7 @@
 //! # Features
 //!
 //! - All the usual parser combinator operations
-//! - Operator overloading for simpler parser declaration
+//! - Macro for simple rule and parser declaration
 //! - Support for recursive parser definitions
 //! - Custom error types - define your own!
 //! - Prioritised / merged failure for more useful errors
@@ -20,15 +20,18 @@
 //! #[derive(Clone, Debug, PartialEq)]
 //! enum Instr { Add, Sub, Left, Right, In, Out, Loop(Vec<Instr>) }
 //!
-//! let bf: Parser<_, _> = recursive(|bf| (
-//!       sym('+') - Instr::Add
-//!     | sym('-') - Instr::Sub
-//!     | sym('<') - Instr::Left
-//!     | sym('>') - Instr::Right
-//!     | sym(',') - Instr::In
-//!     | sym('.') - Instr::Out
-//!     | (sym('[') >> bf << sym(']')) % |ts| Instr::Loop(ts)
-//! ) * Any);
+//! parsers! {
+//!     bf: Parser<_, _> = {
+//!         ( '+' -> { Instr::Add }
+//!         | '-' -> { Instr::Sub }
+//!         | '<' -> { Instr::Left }
+//!         | '>' -> { Instr::Right }
+//!         | ',' -> { Instr::In }
+//!         | '.' -> { Instr::Out }
+//!         | '[' -& bf &- ']' => |ts| { Instr::Loop(ts) }
+//!         ) *
+//!     }
+//! }
 //! ```
 
 extern crate alloc;
@@ -46,7 +49,7 @@ use core::{
     iter::{self, FromIterator},
     cell::RefCell,
     borrow::Borrow,
-    ops::{Add, BitOr, Mul, Rem, Sub, Shl, Shr, Not},
+    //ops::{Add, BitOr, Mul, Rem, Sub, Shl, Shr, Not},
 };
 use crate::{
     error::{ParseError, DefaultParseError},
@@ -72,6 +75,7 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Clone for Parser<'a, T
     }
 }
 
+/*
 // Then
 
 impl<'a, T: Clone + 'a, O: 'a, U: 'a, E: ParseError<'a, T> + 'a> Add<Parser<'a, T, U, E>> for Parser<'a, T, O, E> {
@@ -123,6 +127,7 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Not for Parser<'a, T, 
     type Output = Parser<'a, T, Option<O>, E>;
     fn not(self) -> Self::Output { self.or_not() }
 }
+*/
 
 impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
     // Constructor methods
@@ -531,79 +536,72 @@ macro_rules! parze_error {
 macro_rules! rule {
     // Atoms
 
-    ( $x:literal ) => {
-        $crate::sym($x)
+    ( ( $($inner:tt)* ) ) => { ($crate::rule!( $($inner)* )) };
+    ( { $($inner:tt)* } ) => { { $($inner)* } };
+    ( [ $inner:tt ] ) => { { $crate::all_of($crate::rule!(@AS_EXPR $inner)) } };
+
+    // Tailed atoms
+
+    ( @AS_EXPR $x:tt $($tail:tt)* ) => { $crate::rule!( { $x } $($tail)* ) };
+    ( $x:literal $($tail:tt)* ) => { $crate::rule!( { $crate::sym($x) } $($tail)* ) };
+    //( $x:ident ( $($inner:tt)* ) $($tail:tt)* ) => { $crate::rule!( { $x($($inner)*) } $($tail)* ) };
+    ( $x:ident $($tail:tt)* ) => { $crate::rule!( { $x.link() } $($tail)* ) };
+
+    // Mapping and methods
+
+    ( $a:tt -> $b:tt $($tail:tt)* ) => {
+        $crate::rule!({ ($crate::rule!($a)).to($crate::rule!(@AS_EXPR $b)) } $($tail)*)
+    };
+    ( $a:tt => | $kind:pat | $b:tt $($tail:tt)* ) => {
+        $crate::rule!({ ($crate::rule!($a)).map(|$kind| $crate::rule!(@AS_EXPR $b)) } $($tail)*)
+    };
+    ( $a:tt . $method:ident ( $($args:tt)* ) $($tail:tt)* ) => {
+        $crate::rule!({ ($crate::rule!($a)).$method($($args)*) } $($tail)*)
     };
 
-    ( $x:ident ) => {
-        ($x).link()
+    // High-precedence operators
+
+    ( $a:tt -& $b:tt $($tail:tt)* ) => {
+        $crate::rule!({ ($crate::rule!($a)).delimiter_for($crate::rule!($b)) } $($tail)*)
     };
-
-    ( $x:path ) => {
-        ($x)
+    ( $a:tt &- $b:tt $($tail:tt)* ) => {
+        $crate::rule!({ ($crate::rule!($a)).delimited_by($crate::rule!($b)) } $($tail)*)
     };
-
-    ( { $($inner:tt)* } ) => {
-        { $($inner)* }
-    };
-
-    ( ( $($inner:tt)+ ) ) => {
-        ($crate::rule!($($inner)*))
-    };
-
-    // Unary
-
-    ( | $($tail:tt)+ ) => { // Ignore
-        $crate::rule!($($tail)*)
-    };
-
-    // Operators
-
-    ( $x:tt &- $($tail:tt)+ ) => {
-        ($crate::rule!($x)).delimiter_for($crate::rule!($($tail)*))
-    };
-
-    ( $x:tt -& $($tail:tt)+ ) => {
-        ($crate::rule!($x)).delimited_by($crate::rule!($($tail)*))
-    };
-
-    ( $x:tt & $($tail:tt)+ ) => {
-        ($crate::rule!($x)).then($crate::rule!($($tail)*))
-    };
-
-    ( $x:tt | $($tail:tt)+ ) => {
-        ($crate::rule!($x)).or($crate::rule!($($tail)*))
+    ( $a:tt & $b:tt $($tail:tt)* ) => {
+        $crate::rule!({ ($crate::rule!($a)).then($crate::rule!($b)) } $($tail)*)
     };
 
     // Repetition
 
-    ( $x:tt * ) => {
-        ($crate::rule!($x)).repeat(..)
+    ( $a:tt *= $b:tt $($tail:tt)* ) => {
+        $crate::rule!({ ($crate::rule!($a)).repeat($crate::rule!(@AS_EXPR $b)) } $($tail)*)
+    };
+    ( $a:tt * $($tail:tt)* ) => {
+        $crate::rule!({ ($crate::rule!($a)).repeat(..) } $($tail)*)
+    };
+    ( $a:tt + $($tail:tt)* ) => {
+        $crate::rule!({ ($crate::rule!($a)).repeat(1..) } $($tail)*)
+    };
+    ( $a:tt ? $($tail:tt)* ) => {
+        $crate::rule!({ ($crate::rule!($a)).or_not() } $($tail)*)
     };
 
-    ( $x:tt + ) => {
-        ($crate::rule!($x)).repeat(1..)
+    // Low-precedence operators
+
+    ( $a:tt | $($b:tt)* ) => {
+        { ($crate::rule!($a)).or($crate::rule!($($b)*)) }
     };
 
-    ( $x:tt ? ) => {
-        ($crate::rule!($x)).or_not()
+    // Ignore prefix operators
+
+    ( | $($a:tt)* ) => {
+        $crate::rule!($($a)*)
+    };
+    ( & $($a:tt)* ) => {
+        $crate::rule!($($a)*)
     };
 
-    // Mapping and methods
-
-    ( $x:tt -> $($tail:tt)+ ) => {
-        ($crate::rule!($x)).to($crate::rule!($($tail)*))
-    };
-
-    ( $x:tt => $($tail:tt)+ ) => {
-        ($crate::rule!($x)).map($crate::rule!($($tail)*))
-    };
-
-    ( $x:tt . $method:ident ( $($args:tt)* ) $($tail:tt)* ) => {
-        $crate::rule!({ ($crate::rule!($x)).$method($($args)*) } $($tail)*)
-    };
-
-    // Error
+    ( $x:tt ) => { $x };
 
     ( $($tail:tt)* ) => {
         $crate::parze_error!($($tail)*);
@@ -617,6 +615,9 @@ macro_rules! parsers {
         let $name = $crate::declare();
         $crate::parsers!(@NAMES $($tail)*);
     };
+    ( @NAMES $name:ident = { $($rule:tt)* } $($tail:tt)* ) => {
+        $crate::parsers!(@NAMES $name : _ = { $($rule)* } $($tail)*);
+    };
     ( @NAMES $($tail:tt)* ) => {
         $crate::parze_error!($($tail)*);
     };
@@ -627,6 +628,9 @@ macro_rules! parsers {
         let $name : $kind = ($name).define(__tmp);
         $crate::parsers!(@DEFINITIONS $($tail)*);
     };
+    ( @DEFINITIONS $name:ident = { $($rule:tt)* } $($tail:tt)* ) => {
+        $crate::parsers!(@DEFINITIONS $name : _ = { $($rule)* } $($tail)*);
+    };
     ( @DEFINITIONS $($tail:tt)* ) => {
         $crate::parze_error!($($tail)*);
     };
@@ -636,3 +640,5 @@ macro_rules! parsers {
         $crate::parsers!(@DEFINITIONS $($tail)*);
     };
 }
+
+

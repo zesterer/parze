@@ -15,21 +15,24 @@ use parze::prelude::*;
 #[derive(Clone, Debug, PartialEq)]
 enum Instr { Add, Sub, Left, Right, In, Out, Loop(Vec<Instr>) }
 
-let bf: Parser<_, _> = recursive(|bf| (
-      sym('+') - Instr::Add
-    | sym('-') - Instr::Sub
-    | sym('<') - Instr::Left
-    | sym('>') - Instr::Right
-    | sym(',') - Instr::In
-    | sym('.') - Instr::Out
-    | (sym('[') >> bf << sym(']')) % |ts| Instr::Loop(ts)
-) * Any);
+parsers! {
+    bf = {
+        ( '+' -> { Instr::Add }
+        | '-' -> { Instr::Sub }
+        | '<' -> { Instr::Left }
+        | '>' -> { Instr::Right }
+        | ',' -> { Instr::In }
+        | '.' -> { Instr::Out }
+        | '[' -& bf &- ']' => |ts| { Instr::Loop(ts) }
+        ) *
+    }
+}
 ```
 
 ## Features
 
 - [x] All the usual parser combinator operations
-- [x] Operator overloading for simpler parser declaration
+- [x] Macro for simple rule and parser declaration
 - [x] Support for recursive parser definitions
 - [x] Custom error types - define your own!
 - [x] Prioritised / merged failure for more useful errors
@@ -42,7 +45,7 @@ Parze is largely a personal project. There is currently little reason to use it 
 
 ## Explicit Form
 
-While Parze uses operator overloading for much of its declarative notation, it is possible (and often useful) to make use of the more explicit method-based notation.
+While Parze encourage use of macros for much of its declarative notation, it is possible (and often useful) to make use of the more explicit rust-y notation.
 
 Here is the Brainfuck parser given above, declared in explicit form.
 
