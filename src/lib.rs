@@ -198,8 +198,10 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
     pub fn then<U: 'a>(self, other: Parser<'a, T, U, E>) -> Parser<'a, T, (O, U), E> {
         Parser::custom(move |tokens| {
             let (a_fail, a) = (self.f)(tokens)?;
-            let (b_fail, b) = (other.f)(tokens)?;
-            Ok((a_fail.max(b_fail), (a, b)))
+            match (other.f)(tokens) {
+                Ok((b_fail, b)) => Ok((a_fail.max(b_fail), (a, b))),
+                Err(b_fail) => Err(b_fail.max(a_fail)),
+            }
         })
     }
 
@@ -210,8 +212,10 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
     pub fn also<U: 'a>(self, other: Parser<'a, T, U, E>) -> Parser<'a, T, O::Alsoed, E> where O: Also<U> {
         Parser::custom(move |tokens| {
             let (a_fail, a) = (self.f)(tokens)?;
-            let (b_fail, b) = (other.f)(tokens)?;
-            Ok((a_fail.max(b_fail), a.also(b)))
+            match (other.f)(tokens) {
+                Ok((b_fail, b)) => Ok((a_fail.max(b_fail), a.also(b))),
+                Err(b_fail) => Err(b_fail.max(a_fail)),
+            }
         })
     }
 
@@ -226,8 +230,10 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
     pub fn delimiter_for<U: 'a>(self, other: Parser<'a, T, U, E>) -> Parser<'a, T, U, E> {
         Parser::custom(move |tokens| {
             let (a_fail, _) = (self.f)(tokens)?;
-            let (b_fail, b) = (other.f)(tokens)?;
-            Ok((a_fail.max(b_fail), b))
+            match (other.f)(tokens) {
+                Ok((b_fail, b)) => Ok((a_fail.max(b_fail), b)),
+                Err(b_fail) => Err(b_fail.max(a_fail)),
+            }
         })
     }
 
@@ -235,8 +241,10 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
     pub fn delimited_by<U: 'a>(self, other: Parser<'a, T, U, E>) -> Self {
         Parser::custom(move |tokens| {
             let (a_fail, a) = (self.f)(tokens)?;
-            let (b_fail, _) = (other.f)(tokens)?;
-            Ok((a_fail.max(b_fail), a))
+            match (other.f)(tokens) {
+                Ok((b_fail, b)) => Ok((a_fail.max(b_fail), a)),
+                Err(b_fail) => Err(b_fail.max(a_fail)),
+            }
         })
     }
 

@@ -1,22 +1,52 @@
 use parze::prelude::*;
+use std::collections::HashSet;
+
+type Token = (usize, char);
 
 #[derive(Debug)]
 struct BrainfuckError {
-    found: Option<char>,
-    expected: Vec<char>, // Build up a list of expected symbols
+    found: Option<Token>,
+    expected: HashSet<char>, // Build up a list of expected symbols
 }
 
-impl<'a> ParseError<'a, char> for BrainfuckError {
-    fn unexpected(c: char) -> Self {
-        Self { found: Some(c), expected: Vec::new() }
+impl BrainfuckError {
+    fn print(&self, code: &str) {
+        println!("1 | {}", code);
+
+        if let Some((idx, _)) = self.found {
+            print!("  | ");
+            for _ in 0..idx {
+                print!(" ");
+            }
+            println!("^");
+        }
+
+        let expected_str = self.expected
+            .iter()
+            .map(|c| format!("'{}'", c))
+            .collect::<Vec<_>>()
+            .join(", ");
+        match self.found {
+            Some((idx, c)) => println!("Error at column {}: Found '{}', expected one of {}", idx + 1, c, expected_str),
+            None => println!("Error at end of line: Expected one of {}", expected_str),
+        }
+    }
+}
+
+impl<'a> ParseError<'a, Token> for BrainfuckError {
+    fn unexpected(token: Token) -> Self {
+        Self { found: Some(token), expected: HashSet::default() }
     }
 
     fn unexpected_end() -> Self {
-        Self { found: None, expected: Vec::new() }
+        Self { found: None, expected: HashSet::default() }
     }
 
-    fn combine(mut self, mut other: Self) -> Self {
-        self.expected.append(&mut other.expected);
+    fn combine(mut self, other: Self) -> Self {
+        self.expected = self.expected
+            .union(&other.expected)
+            .copied()
+            .collect();
         self
     }
 }
@@ -32,12 +62,14 @@ enum Instr {
     Loop(Vec<Instr>),
 }
 
-fn expect<'a>(c: char) -> Parser<'a, char, (), BrainfuckError> {
-    sym(c).discard().map_err(move |mut err: BrainfuckError| {
-        // Add the character to the list of expected characters if an error occurred
-        err.expected.push(c);
-        err
-    })
+fn expect<'a>(c: char) -> Parser<'a, Token, (), BrainfuckError> {
+    permit(move |(_, found_c)| found_c == c)
+        .discard()
+        .map_err(move |mut err: BrainfuckError| {
+            // Add the character to the list of expected characters if an error occurred
+            err.expected.insert(c);
+            err
+        })
 }
 
 fn main() {
@@ -54,5 +86,9 @@ fn main() {
         }
     }
 
-    println!("{:?}", bf.parse("[+++".chars().collect::<Vec<_>>()));
+    let code = "+-+-++!--+]+<.[";
+
+    let error = bf.parse(code.chars().enumerate().collect::<Vec<_>>()).unwrap_err();
+
+    error.print(code);
 }
