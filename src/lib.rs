@@ -242,7 +242,7 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
         Parser::custom(move |tokens| {
             let (a_fail, a) = (self.f)(tokens)?;
             match (other.f)(tokens) {
-                Ok((b_fail, b)) => Ok((a_fail.max(b_fail), a)),
+                Ok((b_fail, _)) => Ok((a_fail.max(b_fail), a)),
                 Err(b_fail) => Err(b_fail.max(a_fail)),
             }
         })

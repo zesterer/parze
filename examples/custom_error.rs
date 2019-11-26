@@ -14,13 +14,11 @@ impl BrainfuckError {
     fn print(&self, code: &str) {
         println!("1 | {}", code);
 
-        if let Some((idx, _)) = self.found {
-            print!("  | ");
-            for _ in 0..idx {
-                print!(" ");
-            }
-            println!("^");
+        print!("  | ");
+        for _ in 0..self.found.map(|(idx, _)| idx).unwrap_or(code.len()) {
+            print!(" ");
         }
+        println!("^");
 
         let expected_str = self.expected
             .iter()
@@ -28,8 +26,14 @@ impl BrainfuckError {
             .collect::<Vec<_>>()
             .join(", ");
         match self.found {
-            Some((idx, c)) => println!("Error at column {}: Found '{}', expected one of {}", idx + 1, c, expected_str),
-            None => println!("Error at end of line: Expected one of {}", expected_str),
+            Some((idx, c)) => println!("Error at column {}: Unexpected token '{}'.", idx + 1, c),
+            None => println!("Error: Unexpected end of file."),
+        }
+
+        match self.expected.len() {
+            0 => {},
+            1 => println!("Note: Expected {}.", expected_str),
+            _ => println!("Note: Expected one of {}.", expected_str),
         }
     }
 }
@@ -89,7 +93,8 @@ fn main() {
         }
     }
 
-    let code = "+-+-++!--+]+<.[";
+    // This code contains an error
+    let code = "+++!+[->++++<]>[->++++<].";
 
     let error = bf.parse(code.chars().enumerate().collect::<Vec<_>>()).unwrap_err();
 
