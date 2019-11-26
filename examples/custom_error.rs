@@ -6,10 +6,11 @@ type Token = (usize, char);
 #[derive(Debug)]
 struct BrainfuckError {
     found: Option<Token>,
-    expected: HashSet<char>, // Build up a list of expected symbols
+    expected: HashSet<char>, // A list of expected symbols, assembled during error propagation
 }
 
 impl BrainfuckError {
+    // This is pretty poor code, you can do better
     fn print(&self, code: &str) {
         println!("1 | {}", code);
 
@@ -42,6 +43,7 @@ impl<'a> ParseError<'a, Token> for BrainfuckError {
         Self { found: None, expected: HashSet::default() }
     }
 
+    // Combine two same-priority errors together
     fn combine(mut self, other: Self) -> Self {
         self.expected = self.expected
             .union(&other.expected)
@@ -62,6 +64,7 @@ enum Instr {
     Loop(Vec<Instr>),
 }
 
+// A parser that only accepts tokens with matching characters and produces an "Expected 'c'" error
 fn expect<'a>(c: char) -> Parser<'a, Token, (), BrainfuckError> {
     permit(move |(_, found_c)| found_c == c)
         .discard()
