@@ -18,7 +18,7 @@ nightly = []
 default = ["nightly", "macros"]
 
 [dependencies]
-parze-declare = { path = "parze-declare" }
+parze-declare = { version = "0.1", path = "parze-declare" }
 
 [dev-dependencies]
 pom = "3.0"

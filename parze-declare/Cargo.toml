@@ -1,7 +1,14 @@
 [package]
 name = "parze-declare"
 version = "0.1.0"
+description = "A clean, efficient parser combinator"
 authors = ["Joshua Barretto <joshua.s.barretto@gmail.com>"]
+documentation = "https://docs.rs/parze-declare"
+repository = "https://www.github.com/zesterer/parze"
+homepage = "https://www.github.com/zesterer/parze"
+keywords = ["parse", "token", "symbol", "no_std"]
+categories = ["parsing", "no-std"]
+license = "MIT"
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
