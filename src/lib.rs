@@ -39,8 +39,8 @@ extern crate alloc;
 pub mod error;
 pub mod repeat;
 pub mod also;
-pub mod chain;
 pub mod reduce;
+pub mod pad;
 mod fail;
 
 use alloc::rc::Rc;
@@ -49,6 +49,7 @@ use core::{
     iter::{self, FromIterator},
     cell::RefCell,
     borrow::Borrow,
+    //marker::PhantomData,
     //ops::{Add, BitOr, Mul, Rem, Sub, Shl, Shr, Not},
 };
 use crate::{
@@ -56,17 +57,19 @@ use crate::{
     repeat::Repeat,
     fail::{Fail, MayFail},
     also::Also,
-    chain::Chain,
     reduce::{ReduceLeft, ReduceRight},
+    pad::Padded,
 };
 
 type TokenIter<'a, T> = iter::Enumerate<iter::Cloned<slice::Iter<'a, T>>>;
+
+type ParseResult<O, E> = Result<(MayFail<E>, O), Fail<E>>;
 
 /// A type that represents a rule that may be used to parse a list of symbols.
 ///
 /// Parsers may be combined and manipulated in various ways to create new parsers.
 pub struct Parser<'a, T: Clone + 'a, O: 'a = T, E: ParseError<'a, T> + 'a = DefaultParseError<T>> {
-    f: Rc<dyn Fn(&mut TokenIter<T>) -> Result<(MayFail<E>, O), Fail<E>> + 'a>,
+    f: Rc<dyn Fn(&mut TokenIter<T>) -> ParseResult<O, E> + 'a>,
 }
 
 impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Clone for Parser<'a, T, O, E> {
@@ -135,7 +138,7 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
     // Create a parser that accepts input symbols according to the given custom rule.
     //
     // This is rarely useful. Before use, consider whether other functions may better fit your requirements.
-    fn custom(f: impl Fn(&mut TokenIter<T>) -> Result<(MayFail<E>, O), Fail<E>> + 'a) -> Self {
+    fn custom(f: impl Fn(&mut TokenIter<T>) -> ParseResult<O, E> + 'a) -> Self {
         Self { f: Rc::new(move |tokens| attempt(tokens, &f)) }
     }
 
@@ -195,7 +198,8 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
     }
 
     /// Create a parser that parses symbols that match this parser and then another parser.
-    pub fn then<U: 'a>(self, other: Parser<'a, T, U, E>) -> Parser<'a, T, (O, U), E> {
+    pub fn then<U: 'a>(self, other: impl Into<Parser<'a, T, U, E>>) -> Parser<'a, T, (O, U), E> {
+        let other = other.into();
         Parser::custom(move |tokens| {
             let (a_fail, a) = (self.f)(tokens)?;
             match (other.f)(tokens) {
@@ -209,7 +213,8 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
     ///
     /// Whereas `.then` turns outputs of `(T, U)` and `V` into `((T, U), V)`, this method turns them into `(T, U, V)`.
     /// Due to current limitations in Rust's type system, this method is significantly less useful than it could be.
-    pub fn also<U: 'a>(self, other: Parser<'a, T, U, E>) -> Parser<'a, T, O::Alsoed, E> where O: Also<U> {
+    pub fn also<U: 'a>(self, other: impl Into<Parser<'a, T, U, E>>) -> Parser<'a, T, O::Alsoed, E> where O: Also<U> {
+        let other = other.into();
         Parser::custom(move |tokens| {
             let (a_fail, a) = (self.f)(tokens)?;
             match (other.f)(tokens) {
@@ -219,15 +224,42 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
         })
     }
 
+    /*
     /// Create a parser that parses symbols that match this parser and then another parser.
     ///
     /// Unlike `.then`, this method will chain the two parser outputs together as a vector.
     pub fn chain<U: 'a>(self, other: Parser<'a, T, U, E>) -> Parser<'a, T, O::Chained, E> where O: Chain<U> {
         self.then(other).map(|(a, b)| a.chain(b))
     }
+    */
+
+    /// Create a parser that parsers the same symbols as this parser, but emits its output as a vector
+    ///
+    /// This is most useful when you wish to use singular outputs as part of a chain.
+    pub fn chained(self) -> Parser<'a, T, Vec<O>, E> {
+        self.map(|output| vec![output])
+    }
+
+    /// Create a parser that parses symbols that match this parser and then another parser.
+    ///
+    /// Unlike `.then`, this method will chain the two parser outputs together as a vector.
+    pub fn chain<U: 'a, V: 'a>(self, other: impl Into<Parser<'a, T, U, E>>) -> Parser<'a, T, Vec<V>, E>
+        where O: IntoIterator<Item=V>, U: IntoIterator<Item=V>
+    {
+        let other = other.into();
+        self.then(other).map(|(a, b)| a.into_iter().chain(b.into_iter()).collect())
+    }
+
+    /// Create a parser that with a flatter output than this parser.
+    pub fn flatten<U: 'a, V: 'a>(self) -> Parser<'a, T, Vec<V>, E>
+        where O: IntoIterator<Item=U>, U: IntoIterator<Item=V>
+    {
+        self.map(|a| a.into_iter().map(|a| a.into_iter()).flatten().collect())
+    }
 
     /// Create a parser that parses symbols that match this parser and then another parser, discarding the output of this parser.
-    pub fn delimiter_for<U: 'a>(self, other: Parser<'a, T, U, E>) -> Parser<'a, T, U, E> {
+    pub fn delimiter_for<U: 'a>(self, other: impl Into<Parser<'a, T, U, E>>) -> Parser<'a, T, U, E> {
+        let other = other.into();
         Parser::custom(move |tokens| {
             let (a_fail, _) = (self.f)(tokens)?;
             match (other.f)(tokens) {
@@ -238,7 +270,8 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
     }
 
     /// Create a parser that parses symbols that match this parser and then another parser, discarding the output of the other parser.
-    pub fn delimited_by<U: 'a>(self, other: Parser<'a, T, U, E>) -> Self {
+    pub fn delimited_by<U: 'a>(self, other: impl Into<Parser<'a, T, U, E>>) -> Self {
+        let other = other.into();
         Parser::custom(move |tokens| {
             let (a_fail, a) = (self.f)(tokens)?;
             match (other.f)(tokens) {
@@ -248,18 +281,54 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
         })
     }
 
+    /// Create a parser that accepts the valid input of this parser separated by the valid input of another.
+    pub fn separated_by<U: 'a>(self, other: Parser<'a, T, U, E>) -> Parser<'a, T, Vec<O>, E> {
+
+        Parser::custom(move |tokens| {
+            let mut max_err = MayFail::none();
+            let mut outputs = Vec::new();
+
+            for i in 0.. {
+                match (self.f)(tokens) {
+                    Ok((err, output)) => {
+                        max_err = max_err.max(err);
+                        outputs.push(output);
+                    },
+                    Err(err) if i == 0 => {
+                        max_err = max_err.max(err);
+                        break;
+                    },
+                    Err(err) => return Err(err.max(max_err)),
+                }
+
+                match (other.f)(tokens) {
+                    Ok((err, _)) => max_err = max_err.max(err),
+                    Err(err) => {
+                        max_err = max_err.max(err);
+                        break;
+                    },
+                }
+            }
+
+            Ok((max_err, outputs))
+        })
+
+        //self.clone().delimited_by(other).repeat(..).chain(self.repeat(1)).or_not().flatten()
+    }
+
     /// Create a parser that parses symbols that match this parser followed by any number of the given symbol.
     pub fn padded_by(self, padding: impl Borrow<T> + 'a) -> Self where T: PartialEq {
         self.delimited_by(sym(padding).repeat(..))
     }
 
     /// Create a parser that parses character-like symbols that match this parser followed by any number of whitespace symbols.
-    pub fn padded(self) -> Self where T: Borrow<char> {
-        self.delimited_by(permit(|c: T| c.borrow().is_whitespace()).repeat(..))
+    pub fn padded<U: Padded>(self) -> Self where T: Borrow<U> {
+        self.delimited_by(permit(|c: T| c.borrow().is_padding()).repeat(..))
     }
 
     /// Create a parser that parses symbols that match this parser or another parser.
-    pub fn or(self, other: Parser<'a, T, O, E>) -> Self {
+    pub fn or(self, other: impl Into<Parser<'a, T, O, E>>) -> Self {
+        let other = other.into();
         Parser::custom(move |tokens| {
             let a = (self.f)(tokens);
             let mut b_tokens = tokens.clone();
@@ -284,7 +353,8 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
     ///
     /// This method is 'short-circuiting': if this parser succeeds, the fallback parser won't even be invoked.
     /// This means that emitted errors may not include information from the fallback parser.
-    pub fn or_fallback(self, other: Parser<'a, T, O, E>) -> Self {
+    pub fn or_fallback(self, other: impl Into<Parser<'a, T, O, E>>) -> Self {
+        let other = other.into();
         Parser::custom(move |tokens| {
             let a = (self.f)(tokens);
             match a {
@@ -507,6 +577,11 @@ pub fn nothing<'a, T: Clone + 'a + PartialEq, E: ParseError<'a, T> + 'a>() -> Pa
     permit(|_| false).discard()
 }
 
+/// A parser that accepts one symbol provided it passes the given test.
+pub fn padding<'a, T: Clone + Padded + 'a, E: ParseError<'a, T> + 'a>() -> Parser<'a, T, (), E> {
+    permit(|t: T| t.is_padding()).repeat(..).discard()
+}
+
 /// A parser that invokes another parser, as generated by the given function.
 ///
 /// This function is generally used to create recursive parsers, along with `Declaration`.
@@ -528,6 +603,7 @@ pub mod prelude {
         none_of,
         all_of,
         permit,
+        padding,
         maybe_map,
         call,
         rule,
@@ -549,6 +625,8 @@ macro_rules! parze_error {
 /// | Syntax     | Name          | Description                           |
 /// |------------|---------------|---------------------------------------|
 /// | x & y      | then          | Equivalent to `x.then(y)`             |
+/// | x % y      | chain         | Equivalent to `x.chain(y)`            |
+/// | x ... y    | separated     | Equivalent to `x.separated_by(y)`     |
 /// | x \| y     | or            | Equivalent to `x.or(y)`               |
 /// | x *        | any           | Equivalent to `x.repeat(..)`          |
 /// | x +        | at least one  | Equivalent to `x.repeat(1..)`         |
@@ -558,7 +636,9 @@ macro_rules! parze_error {
 /// | x *= N     | repeat        | Equivalent to `x.repeat(N)`           |
 /// | x -> Y     | to            | Equivalent to `x.to(y)`               |
 /// | x => F     | map           | Equivalent to `x.map(F)`              |
-/// | \[ X \]    | all of        | Equivalent to `all_of(X)`             |
+/// | \[@ X \]   | all of        | Equivalent to `all_of(X)`             |
+/// | \[! X \]   | none of       | Equivalent to `none_of(X)`            |
+/// | \[? X \]   | one of        | Equivalent to `one_of(X)`             |
 /// | { X }      | expr          | Considers `X` to be a Rust expression |
 #[macro_export]
 macro_rules! rule {
@@ -566,7 +646,9 @@ macro_rules! rule {
 
     ( ( $($inner:tt)* ) ) => { ($crate::rule!( $($inner)* )) };
     ( { $($inner:tt)* } ) => { { $($inner)* } };
-    ( [ $inner:tt ] ) => { { $crate::all_of($crate::rule!(@AS_EXPR $inner)) } };
+    ( [@ $inner:tt ] ) => { { $crate::all_of($crate::rule!(@AS_EXPR $inner)) } };
+    ( [! $inner:tt ] ) => { { $crate::none_of($crate::rule!(@AS_EXPR $inner)) } };
+    ( [? $inner:tt ] ) => { { $crate::one_of($crate::rule!(@AS_EXPR $inner)) } };
 
     // Tailed atoms
 
@@ -597,6 +679,12 @@ macro_rules! rule {
     };
     ( $a:tt & $b:tt $($tail:tt)* ) => {
         $crate::rule!({ ($crate::rule!($a)).then($crate::rule!($b)) } $($tail)*)
+    };
+    ( $a:tt % $b:tt $($tail:tt)* ) => {
+        $crate::rule!({ ($crate::rule!($a)).chain($crate::rule!($b)) } $($tail)*)
+    };
+    ( $a:tt ... $b:tt $($tail:tt)* ) => {
+        $crate::rule!({ ($crate::rule!($a)).separated_by($crate::rule!($b)) } $($tail)*)
     };
 
     // Repetition

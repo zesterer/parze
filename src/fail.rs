@@ -16,6 +16,7 @@ impl<E> Fail<E> {
         Self(self.0, f(self.1))
     }
 
+    #[inline(always)]
     pub fn max<'a, T: Clone + 'a>(self, other: impl Into<MayFail<E>>) -> Self where E: ParseError<'a, T> {
         match other.into().0 {
             Some((idx, err)) if idx == self.0 => Self(idx, err.combine(self.1)),
@@ -38,6 +39,7 @@ impl<E> MayFail<E> {
         MayFail(self.0.map(|(idx, e)| (idx, f(e))))
     }
 
+    #[inline(always)]
     pub fn max<'a, T: Clone + 'a>(self, other: impl Into<MayFail<E>>) -> Self where E: ParseError<'a, T> {
         match (self.0, other.into().0) {
             (Some(a), Some(b)) => Fail(a.0, a.1).max(Fail(b.0, b.1)).into(),

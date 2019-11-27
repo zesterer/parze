@@ -58,3 +58,13 @@ fn brainfuck() {
 
     assert_eq!(bf.parse(program_src.chars().collect::<Vec<_>>()), Ok(program_tgt));
 }
+
+#[test]
+fn types() {
+    /*
+    let p: Parser<_, _> = Parser::from(
+        sym('!').into_specific().then(sym('?').into_specific())
+    );
+    */
+}
+
