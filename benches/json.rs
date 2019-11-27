@@ -95,7 +95,7 @@ mod parze {
         recursive(|value| {
             let integer = one_of(b"123456789").chained()
                 .chain(one_of(b"0123456789").repeat(..))
-                .or(sym(b'0').chained());
+                .or_chain(sym(b'0').chained());
             let frac = sym(b'.').chained()
                 .chain(one_of(b"0123456789").repeat(1..));
             let exp = one_of(b"eE").chained()
@@ -105,7 +105,7 @@ mod parze {
                 .chain(integer)
                 .chain(frac.or_not().flatten())
                 .chain(exp.or_not().flatten())
-                .map(|bs| str::from_utf8(&bs).unwrap().parse().unwrap());
+                .map(|bs| str::from_utf8(&bs.as_slice()).unwrap().parse().unwrap());
 
             let special_char = sym(b'\\')
                 .or(sym(b'/'))

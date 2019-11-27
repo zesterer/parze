@@ -1,3 +1,5 @@
+#![feature(specialization)]
+
 //! Parze is a clean, efficient parser combinator written in Rust.
 //!
 //! # Features
@@ -41,6 +43,7 @@ pub mod repeat;
 pub mod also;
 pub mod reduce;
 pub mod pad;
+pub mod chain;
 mod fail;
 
 use alloc::rc::Rc;
@@ -59,6 +62,7 @@ use crate::{
     also::Also,
     reduce::{ReduceLeft, ReduceRight},
     pad::Padded,
+    chain::{Chain, IntoChain, Single},
 };
 
 type TokenIter<'a, T> = iter::Enumerate<iter::Cloned<slice::Iter<'a, T>>>;
@@ -236,25 +240,24 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
     /// Create a parser that parsers the same symbols as this parser, but emits its output as a vector
     ///
     /// This is most useful when you wish to use singular outputs as part of a chain.
-    pub fn chained(self) -> Parser<'a, T, Vec<O>, E> {
-        self.map(|output| vec![output])
+    pub fn chained(self) -> Parser<'a, T, impl Chain<Item=O>, E> {
+        self.map(|output| Single::from(output))
     }
 
     /// Create a parser that parses symbols that match this parser and then another parser.
     ///
     /// Unlike `.then`, this method will chain the two parser outputs together as a vector.
-    pub fn chain<U: 'a, V: 'a>(self, other: impl Into<Parser<'a, T, U, E>>) -> Parser<'a, T, Vec<V>, E>
-        where O: IntoIterator<Item=V>, U: IntoIterator<Item=V>
+    pub fn chain<U: 'a, V: 'a>(self, other: impl Into<Parser<'a, T, U, E>>) -> Parser<'a, T, impl Chain<Item=V>, E>
+        where O: IntoChain<Item=V>, U: IntoChain<Item=V>
     {
-        let other = other.into();
-        self.then(other).map(|(a, b)| a.into_iter().chain(b.into_iter()).collect())
+        self.then(other.into()).map(|(a, b)| a.into_chain().into_iter().chain(b.into_chain().into_iter()).collect::<Vec<_>>())
     }
 
     /// Create a parser that with a flatter output than this parser.
-    pub fn flatten<U: 'a, V: 'a>(self) -> Parser<'a, T, Vec<V>, E>
-        where O: IntoIterator<Item=U>, U: IntoIterator<Item=V>
+    pub fn flatten<U: 'a, V: 'a>(self) -> Parser<'a, T, impl Chain<Item=V>, E>
+        where O: IntoChain<Item=U>, U: IntoChain<Item=V>
     {
-        self.map(|a| a.into_iter().map(|a| a.into_iter()).flatten().collect())
+        self.map(|a| a.into_chain().into_iter().map(|a| a.into_chain().into_iter()).flatten().collect::<Vec<_>>())
     }
 
     /// Create a parser that parses symbols that match this parser and then another parser, discarding the output of this parser.
@@ -283,7 +286,6 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
 
     /// Create a parser that accepts the valid input of this parser separated by the valid input of another.
     pub fn separated_by<U: 'a>(self, other: Parser<'a, T, U, E>) -> Parser<'a, T, Vec<O>, E> {
-
         Parser::custom(move |tokens| {
             let mut max_err = MayFail::none();
             let mut outputs = Vec::new();
@@ -323,7 +325,7 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
 
     /// Create a parser that parses character-like symbols that match this parser followed by any number of whitespace symbols.
     pub fn padded<U: Padded>(self) -> Self where T: Borrow<U> {
-        self.delimited_by(permit(|c: T| c.borrow().is_padding()).repeat(..))
+        self.delimited_by(padding())
     }
 
     /// Create a parser that parses symbols that match this parser or another parser.
@@ -342,6 +344,31 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
                     Ok((b_fail, b)) => {
                         *tokens = b_tokens;
                         Ok((b_fail.max(a_fail), b))
+                    },
+                    Err(b_fail) => Err(a_fail.max(b_fail)),
+                },
+            }
+        })
+    }
+
+    /// Create a parser that parses symbols that match this parser or another parser where both parsers are chains.
+    pub fn or_chain<U, V: 'a>(self, other: impl Into<Parser<'a, T, V, E>>) -> Parser<'a, T, impl Chain<Item=U>, E>
+        where V: IntoChain<Item=U>, O: IntoChain<Item=U>
+    {
+        let other = other.into();
+        Parser::custom(move |tokens| {
+            let a = (self.f)(tokens);
+            let mut b_tokens = tokens.clone();
+            let b = (other.f)(&mut b_tokens);
+            match a {
+                Ok((a_fail, a)) => match b {
+                    Ok((b_fail, _)) => Ok((a_fail.max(b_fail), a.into_chain().into_iter().collect::<Vec<_>>())),
+                    Err(b_fail) => Ok((a_fail.max(b_fail), a.into_chain().into_iter().collect())),
+                },
+                Err(a_fail) => match b {
+                    Ok((b_fail, b)) => {
+                        *tokens = b_tokens;
+                        Ok((b_fail.max(a_fail), b.into_chain().into_iter().collect()))
                     },
                     Err(b_fail) => Err(a_fail.max(b_fail)),
                 },
@@ -416,6 +443,23 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
         } else {
             Ok(output)
         }
+    }
+}
+
+impl<'a, T: Clone + 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, (), E> {
+    fn padding<U: Padded>() -> Self where T: Borrow<U> {
+        Self::custom(|tokens| {
+            while tokens
+                .clone()
+                .next()
+                .map(|(_, token)| token.borrow().is_padding())
+                .unwrap_or(false)
+            {
+                tokens.next();
+            }
+
+            Ok((MayFail::none(), ()))
+        })
     }
 }
 
@@ -579,8 +623,8 @@ pub fn nothing<'a, T: Clone + 'a + PartialEq, E: ParseError<'a, T> + 'a>() -> Pa
 }
 
 /// A parser that accepts one symbol provided it passes the given test.
-pub fn padding<'a, T: Clone + Padded + 'a, E: ParseError<'a, T> + 'a>() -> Parser<'a, T, (), E> {
-    permit(|t: T| t.is_padding()).repeat(..).discard()
+pub fn padding<'a, T: Clone + 'a, U: Padded, E: ParseError<'a, T> + 'a>() -> Parser<'a, T, (), E> where T: Borrow<U> {
+    Parser::padding()
 }
 
 /// A parser that invokes another parser, as generated by the given function.
@@ -594,6 +638,7 @@ pub mod prelude {
     pub use super::{
         error::{self, ParseError, DefaultParseError},
         repeat::{self, Repeat, Repeat::Any},
+        chain::{Chain, IntoChain},
         Parser,
         Declaration,
         declare,

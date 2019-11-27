@@ -19,9 +19,9 @@ impl<E> Fail<E> {
     #[inline(always)]
     pub fn max<'a, T: Clone + 'a>(self, other: impl Into<MayFail<E>>) -> Self where E: ParseError<'a, T> {
         match other.into().0 {
-            Some((idx, err)) if idx == self.0 => Self(idx, err.combine(self.1)),
             Some((idx, err)) if idx > self.0 => Self(idx, err),
             Some((idx, _)) if idx < self.0 => Self(self.0, self.1),
+            Some((idx, err)) if idx == self.0 => Self(idx, err.combine(self.1)),
             _ => self,
         }
     }
