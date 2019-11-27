@@ -54,7 +54,7 @@ test pom   ... bench:  18,843,978 ns/iter (+/- 2,602,971)
 
 ## Explicit Form
 
-While Parze encourage use of macros for much of its declarative notation, it is possible (and often useful) to make use of the more explicit rust-y notation.
+While Parze encourages use of macros for much of its declarative notation, it is possible (and often useful) to make use of the more explicit rust-y notation.
 
 Here is the Brainfuck parser given above, declared in explicit form.
 
