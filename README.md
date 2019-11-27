@@ -43,6 +43,19 @@ parsers! {
 
 Parze is fast and lightweight, acting as a bare-bones framework upon which more verbose and interesting parsers can be constructed (see the `custom_error` example).
 
+## Nightly
+
+Parze's declaration macro currently requires a nightly Rust compiler to work.
+You may use the explicit declaration form (as shown below) with stable by disabling the `nightly` feature, however.
+
+This can be done like so in your `Cargo.toml`:
+
+```
+[dependencies.parze]
+version = "x.y.z"
+default-features = false
+```
+
 ## Performance
 
 Here are the results of a JSON parsing test when compared with [`pom`](https://github.com/J-F-Liu/pom). More performance metrics to come later.
