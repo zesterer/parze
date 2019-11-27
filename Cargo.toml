@@ -16,3 +16,4 @@ edition = "2018"
 
 [dev-dependencies]
 pom = "3.0"
+nom = "5.0"

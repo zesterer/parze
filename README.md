@@ -41,7 +41,16 @@ parsers! {
 
 ## Why Parze?
 
-Parze is largely a personal project. There is currently little reason to use it over a well-established existing parser combinator like [pom](https://github.com/J-F-Liu/pom).
+Parze is fast and lightweight, acting as a bare-bones framework upon which more verbose and interesting parsers can be constructed (see the `custom_error` example).
+
+## Performance
+
+Here are the results of a JSON parsing test when compared with [`pom`](https://github.com/J-F-Liu/pom). More performance metrics to come later.
+
+```
+test parze ... bench:   5,275,399 ns/iter (+/- 653,539)
+test pom   ... bench:  18,843,978 ns/iter (+/- 2,602,971)
+```
 
 ## Explicit Form
 

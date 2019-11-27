@@ -1,5 +1,3 @@
-#![feature(specialization)]
-
 //! Parze is a clean, efficient parser combinator written in Rust.
 //!
 //! # Features
@@ -139,15 +137,16 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Not for Parser<'a, T, 
 impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
     // Constructor methods
 
-    // Create a parser that accepts input symbols according to the given custom rule.
-    //
-    // This is rarely useful. Before use, consider whether other functions may better fit your requirements.
+    fn raw(f: impl Fn(&mut TokenIter<T>) -> ParseResult<O, E> + 'a) -> Self {
+        Self { f: Rc::new(f) }
+    }
+
     fn custom(f: impl Fn(&mut TokenIter<T>) -> ParseResult<O, E> + 'a) -> Self {
-        Self { f: Rc::new(move |tokens| attempt(tokens, &f)) }
+        Self::raw(move |tokens| attempt(tokens, &f))
     }
 
     fn maybe_map(f: impl Fn(T) -> Option<O> + 'a) -> Self {
-        Self::custom(move |tokens| try_parse(tokens, |(idx, tok), _| {
+        Self::raw(move |tokens| try_parse(tokens, |(idx, tok), _| {
             match f(tok.clone()) {
                 Some(output) => Ok((MayFail::none(), output)),
                 None => Err(Fail::new(idx, E::unexpected(tok))),
@@ -323,7 +322,9 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
         self.delimited_by(sym(padding).repeat(..))
     }
 
-    /// Create a parser that parses character-like symbols that match this parser followed by any number of whitespace symbols.
+    /// Create a parser that parses character-like symbols that match this parser followed by any number of 'padding' (usually taken to mean whitespace) symbols.
+    ///
+    /// You can implement the `Padded` trait for your own symbol types to use this method with them.
     pub fn padded<U: Padded>(self) -> Self where T: Borrow<U> {
         self.delimited_by(padding())
     }
@@ -622,7 +623,9 @@ pub fn nothing<'a, T: Clone + 'a + PartialEq, E: ParseError<'a, T> + 'a>() -> Pa
     permit(|_| false).discard()
 }
 
-/// A parser that accepts one symbol provided it passes the given test.
+/// A parser that accepts any number of 'padding' symbols. Usually, this is taken to mean whitespace.
+///
+/// You can implement the `Padded` trait for your own symbol types to use this function with them.
 pub fn padding<'a, T: Clone + 'a, U: Padded, E: ParseError<'a, T> + 'a>() -> Parser<'a, T, (), E> where T: Borrow<U> {
     Parser::padding()
 }
