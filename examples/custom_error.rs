@@ -1,3 +1,6 @@
+#![cfg(feature = "macros")]
+#![feature(proc_macro_hygiene)]
+
 use parze::prelude::*;
 use std::collections::HashSet;
 

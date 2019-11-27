@@ -1,14 +1,14 @@
 pub trait Chain {
     type Item;
     type IntoIter: IntoIterator<Item=Self::Item>;
-    fn into_iter(self) -> <Self::IntoIter as IntoIterator>::IntoIter;
+    fn into_iter_chain(self) -> <Self::IntoIter as IntoIterator>::IntoIter;
     fn as_slice(&self) -> &[Self::Item];
 }
 
 impl<T> Chain for Vec<T> {
     type Item = T;
     type IntoIter = <Self as IntoIterator>::IntoIter;
-    fn into_iter(self) -> <Self::IntoIter as IntoIterator>::IntoIter { IntoIterator::into_iter(self) }
+    fn into_iter_chain(self) -> <Self::IntoIter as IntoIterator>::IntoIter { IntoIterator::into_iter(self) }
     fn as_slice(&self) -> &[Self::Item] { &self }
 }
 
@@ -33,7 +33,7 @@ impl<T> IntoIterator for Single<T> {
 impl<T> Chain for Single<T> {
     type Item = T;
     type IntoIter = <Self as IntoIterator>::IntoIter;
-    fn into_iter(self) -> <Self::IntoIter as IntoIterator>::IntoIter { IntoIterator::into_iter(self) }
+    fn into_iter_chain(self) -> <Self::IntoIter as IntoIterator>::IntoIter { IntoIterator::into_iter(self) }
     fn as_slice(&self) -> &[Self::Item] { &self.0 }
 }
 
@@ -74,7 +74,7 @@ pub struct OptionChain<T>(Option<[T; 1]>);
 impl<T> Chain for OptionChain<T> {
     type Item = T;
     type IntoIter = <Self as IntoIterator>::IntoIter;
-    fn into_iter(self) -> <Self::IntoIter as IntoIterator>::IntoIter { IntoIterator::into_iter(self) }
+    fn into_iter_chain(self) -> <Self::IntoIter as IntoIterator>::IntoIter { IntoIterator::into_iter(self) }
     fn as_slice(&self) -> &[Self::Item] {
         self.0.as_ref().map(|arr| arr.as_ref()).unwrap_or(&[])
     }

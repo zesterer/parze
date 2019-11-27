@@ -12,7 +12,13 @@ readme = "README.md"
 license = "MIT"
 edition = "2018"
 
+[features]
+macros = ["nightly"]
+nightly = []
+default = ["nightly", "macros"]
+
 [dependencies]
+parze-declare = { path = "parze-declare" }
 
 [dev-dependencies]
 pom = "3.0"

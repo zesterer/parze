@@ -1,3 +1,6 @@
+#![cfg(feature = "macros")]
+#![feature(proc_macro_hygiene)]
+
 use parze::prelude::*;
 
 #[derive(Debug)]
@@ -32,28 +35,28 @@ fn main() {
         }
 
         atom = {
-            ( number | '(' -& expr &- ')').padded()
+            ( number | '(' -& expr &- ')')~
         }
 
         unary = {
-            ('-'.padded()* & atom).reduce_left(|_, e| Expr::Neg(e.into()))
+            '-'~* & atom <: { |_, e| Expr::Neg(e.into()) }
         }
 
         product = {
-            (unary & ((('*' | '/' | '%').padded() & unary)*)).reduce_right(|a, (op, b)| match op {
+            unary & (('*' | '/' | '%')~ & unary)* :> { |a, (op, b)| match op {
                 '*' => Expr::Mul(a.into(), b.into()),
                 '/' => Expr::Div(a.into(), b.into()),
                 '%' => Expr::Rem(a.into(), b.into()),
                 _ => unreachable!(),
-            })
+            }}
         }
 
         sum = {
-            (product & ((('+' | '-').padded() & product)*)).reduce_right(|a, (op, b)| match op {
+            product & (('+' | '-')~ & product)* :> {|a, (op, b)| match op {
                 '+' => Expr::Add(a.into(), b.into()),
                 '-' => Expr::Sub(a.into(), b.into()),
                 _ => unreachable!(),
-            })
+            }}
         }
 
         expr: Parser<_, _> = { ' '* -& sum }

@@ -1,3 +1,5 @@
+#![feature(proc_macro_hygiene)]
+
 use parze::prelude::*;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -23,7 +25,7 @@ fn simple() {
 
         repeat_at_least_once: Parser<_, _> = { ('+' & '-')+ }
 
-        repeater_4: Parser<_, _> = { '+'.repeat(4) }
+        repeater_4: Parser<_, _> = { '+'* }
 
         mapper: Parser<_, _> = { '+' => { |c| format!("{}", c) } }
 
@@ -38,10 +40,4 @@ fn simple() {
             )*
         }
     }
-
-    let foo: Parser<_, _> = rule! {
-        | '0' & '1' => { |_| ('!', '?') }
-        | 'a' & (('b' *= ..) => { |_| '!' })
-        | 'a' & ('b' *) -> ('!', '@')
-    };
 }

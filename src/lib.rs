@@ -15,6 +15,9 @@
 //! A parser capable of parsing all valid Brainfuck code into an AST.
 //!
 //! ```
+//! #![cfg(feature = "macros")]
+//! #![feature(proc_macro_hygiene)]
+//!
 //! use parze::prelude::*;
 //!
 //! #[derive(Clone, Debug, PartialEq)]
@@ -43,6 +46,34 @@ pub mod reduce;
 pub mod pad;
 pub mod chain;
 mod fail;
+
+// Reexports
+
+/// A macro to define parser rules.
+///
+/// # Operators
+///
+/// Listed in order of precedence
+///
+/// | Syntax     | Name           | Description                           |
+/// |------------|----------------|---------------------------------------|
+/// | ~ x        | before padding | Equivalent to `x.before_padding()`    |
+/// | x ~        | after padding  | Equivalent to `x.after_padding()`     |
+/// | x *        | any            | Equivalent to `x.repeat(..)`          |
+/// | x +        | at least one   | Equivalent to `x.repeat(1..)`         |
+/// | x ?        | optional       | Equivalent to `x.or_not()`            |
+/// | x ... y    | separated      | Equivalent to `x.separated_by(y)`     |
+/// | x & y      | then           | Equivalent to `x.then(y)`             |
+/// | x -& y     | delimiter for  | Equivalent to `x.delimiter_for(y)`    |
+/// | x % y      | chain          | Equivalent to `x.chain(y)`            |
+/// | x &- y     | delimited by   | Equivalent to `x.delimited_by(y)`     |
+/// | x -> Y     | to             | Equivalent to `x.to(y)`               |
+/// | x => F     | map            | Equivalent to `x.map(F)`              |
+/// | x <: F     | reduce left    | Equivalent to `x.reduce_left(F)`      |
+/// | x :> F     | reduce right   | Equivalent to `x.reduce_right(F)`     |
+/// | x \| y     | or             | Equivalent to `x.or(y)`               |
+/// | { X }      | expr           | Considers `X` to be a Rust expression |
+pub use parze_declare::rule;
 
 use alloc::rc::Rc;
 use core::{
@@ -145,11 +176,11 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
         Self::raw(move |tokens| attempt(tokens, &f))
     }
 
-    fn maybe_map(f: impl Fn(T) -> Option<O> + 'a) -> Self {
+    fn try_map(f: impl Fn(T) -> Result<O, E> + 'a) -> Self {
         Self::raw(move |tokens| try_parse(tokens, |(idx, tok), _| {
             match f(tok.clone()) {
-                Some(output) => Ok((MayFail::none(), output)),
-                None => Err(Fail::new(idx, E::unexpected(tok))),
+                Ok(output) => Ok((MayFail::none(), output)),
+                Err(err) => Err(Fail::new(idx, err)),
             }
         }))
     }
@@ -249,14 +280,14 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
     pub fn chain<U: 'a, V: 'a>(self, other: impl Into<Parser<'a, T, U, E>>) -> Parser<'a, T, impl Chain<Item=V>, E>
         where O: IntoChain<Item=V>, U: IntoChain<Item=V>
     {
-        self.then(other.into()).map(|(a, b)| a.into_chain().into_iter().chain(b.into_chain().into_iter()).collect::<Vec<_>>())
+        self.then(other.into()).map(|(a, b)| a.into_chain().into_iter_chain().chain(b.into_chain().into_iter_chain()).collect::<Vec<_>>())
     }
 
     /// Create a parser that with a flatter output than this parser.
     pub fn flatten<U: 'a, V: 'a>(self) -> Parser<'a, T, impl Chain<Item=V>, E>
         where O: IntoChain<Item=U>, U: IntoChain<Item=V>
     {
-        self.map(|a| a.into_chain().into_iter().map(|a| a.into_chain().into_iter()).flatten().collect::<Vec<_>>())
+        self.map(|a| a.into_chain().into_iter_chain().map(|a| a.into_chain().into_iter_chain()).flatten().collect::<Vec<_>>())
     }
 
     /// Create a parser that parses symbols that match this parser and then another parser, discarding the output of this parser.
@@ -317,16 +348,25 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
         //self.clone().delimited_by(other).repeat(..).chain(self.repeat(1)).or_not().flatten()
     }
 
-    /// Create a parser that parses symbols that match this parser followed by any number of the given symbol.
-    pub fn padded_by(self, padding: impl Borrow<T> + 'a) -> Self where T: PartialEq {
-        self.delimited_by(sym(padding).repeat(..))
-    }
-
-    /// Create a parser that parses character-like symbols that match this parser followed by any number of 'padding' (usually taken to mean whitespace) symbols.
+    /// Create a parser that parses character-like symbols that match this parser followed or preceded by any number of 'padding' (usually taken to mean whitespace) symbols.
     ///
     /// You can implement the `Padded` trait for your own symbol types to use this method with them.
     pub fn padded<U: Padded>(self) -> Self where T: Borrow<U> {
+        self.before_padding().after_padding()
+    }
+
+    /// Create a parser that parses any symbols that match this parser followed by any number of 'padding' (usually taken to mean whitespace) symbols.
+    ///
+    /// You can implement the `Padded` trait for your own symbol types to use this method with them.
+    pub fn before_padding<U: Padded>(self) -> Self where T: Borrow<U> {
         self.delimited_by(padding())
+    }
+
+    /// Create a parser that parses any number of 'padding' (usually taken to mean whitespace) symbols followed by any symbols that match this parser.
+    ///
+    /// You can implement the `Padded` trait for your own symbol types to use this method with them.
+    pub fn after_padding<U: Padded>(self) -> Self where T: Borrow<U> {
+        padding().delimiter_for(self)
     }
 
     /// Create a parser that parses symbols that match this parser or another parser.
@@ -363,13 +403,13 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
             let b = (other.f)(&mut b_tokens);
             match a {
                 Ok((a_fail, a)) => match b {
-                    Ok((b_fail, _)) => Ok((a_fail.max(b_fail), a.into_chain().into_iter().collect::<Vec<_>>())),
-                    Err(b_fail) => Ok((a_fail.max(b_fail), a.into_chain().into_iter().collect())),
+                    Ok((b_fail, _)) => Ok((a_fail.max(b_fail), a.into_chain().into_iter_chain().collect::<Vec<_>>())),
+                    Err(b_fail) => Ok((a_fail.max(b_fail), a.into_chain().into_iter_chain().collect())),
                 },
                 Err(a_fail) => match b {
                     Ok((b_fail, b)) => {
                         *tokens = b_tokens;
-                        Ok((b_fail.max(a_fail), b.into_chain().into_iter().collect()))
+                        Ok((b_fail.max(a_fail), b.into_chain().into_iter_chain().collect()))
                     },
                     Err(b_fail) => Err(a_fail.max(b_fail)),
                 },
@@ -466,7 +506,7 @@ impl<'a, T: Clone + 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, (), E> {
 
 impl<'a, T: Clone + 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, T, E> {
     fn permit(f: impl Fn(T) -> bool + 'a) -> Self {
-        Self::maybe_map(move |tok| if f(tok.clone()) { Some(tok) } else { None })
+        Self::try_map(move |tok| if f(tok.clone()) { Ok(tok) } else { Err(E::unexpected(tok)) })
     }
 
     fn sym(expected: impl Borrow<T> + 'a) -> Self where T: PartialEq {
@@ -604,8 +644,13 @@ pub fn permit<'a, T: Clone + 'a, E: ParseError<'a, T> + 'a>(f: impl Fn(T) -> boo
 ///
 /// This function is extremely powerful, and is actually a superset of several other parser functions defined in this crate.
 /// However, this power also makes it fairly awkward to use. You might be better served by another function.
+pub fn try_map<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a>(f: impl Fn(T) -> Result<O, E> + 'static) -> Parser<'a, T, O, E> {
+    Parser::try_map(f)
+}
+
+/// A parser that accepts one symbol provided it passes the given test, mapping it to another symbol in the process.
 pub fn maybe_map<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a>(f: impl Fn(T) -> Option<O> + 'static) -> Parser<'a, T, O, E> {
-    Parser::maybe_map(f)
+    Parser::try_map(move |tok: T| f(tok.clone()).ok_or(E::unexpected(tok)))
 }
 
 /// A parser that accepts any single symbol.
@@ -660,117 +705,10 @@ pub mod prelude {
     };
 }
 
+#[cfg(feature = "macros")]
 #[macro_export]
 macro_rules! parze_error {
     () => {};
-}
-
-/// A macro to define parser rules.
-///
-/// # Operators
-///
-/// Note that `|` has a lower precedence than all other operators
-///
-/// | Syntax     | Name          | Description                           |
-/// |------------|---------------|---------------------------------------|
-/// | x & y      | then          | Equivalent to `x.then(y)`             |
-/// | x % y      | chain         | Equivalent to `x.chain(y)`            |
-/// | x ... y    | separated     | Equivalent to `x.separated_by(y)`     |
-/// | x \| y     | or            | Equivalent to `x.or(y)`               |
-/// | x *        | any           | Equivalent to `x.repeat(..)`          |
-/// | x +        | at least one  | Equivalent to `x.repeat(1..)`         |
-/// | x ?        | optional      | Equivalent to `x.or_not()`            |
-/// | x -& y     | delimiter for | Equivalent to `x.delimiter_for(y)`    |
-/// | x &- y     | delimited by  | Equivalent to `x.delimited_by(y)`     |
-/// | x *= N     | repeat        | Equivalent to `x.repeat(N)`           |
-/// | x -> Y     | to            | Equivalent to `x.to(y)`               |
-/// | x => F     | map           | Equivalent to `x.map(F)`              |
-/// | \[@ X \]   | all of        | Equivalent to `all_of(X)`             |
-/// | \[! X \]   | none of       | Equivalent to `none_of(X)`            |
-/// | \[? X \]   | one of        | Equivalent to `one_of(X)`             |
-/// | { X }      | expr          | Considers `X` to be a Rust expression |
-#[macro_export]
-macro_rules! rule {
-    // Atoms
-
-    ( ( $($inner:tt)* ) ) => { ($crate::rule!( $($inner)* )) };
-    ( { $($inner:tt)* } ) => { { $($inner)* } };
-    ( [@ $inner:tt ] ) => { { $crate::all_of($crate::rule!(@AS_EXPR $inner)) } };
-    ( [! $inner:tt ] ) => { { $crate::none_of($crate::rule!(@AS_EXPR $inner)) } };
-    ( [? $inner:tt ] ) => { { $crate::one_of($crate::rule!(@AS_EXPR $inner)) } };
-
-    // Tailed atoms
-
-    ( @AS_EXPR $x:tt $($tail:tt)* ) => { $crate::rule!( { $x } $($tail)* ) };
-    ( $x:literal $($tail:tt)* ) => { $crate::rule!( { $crate::sym($x) } $($tail)* ) };
-    //( $x:ident ( $($inner:tt)* ) $($tail:tt)* ) => { $crate::rule!( { $x($($inner)*) } $($tail)* ) };
-    ( $x:ident $($tail:tt)* ) => { $crate::rule!( { $x.link() } $($tail)* ) };
-
-    // Mapping and methods
-
-    ( $a:tt -> $b:tt $($tail:tt)* ) => {
-        $crate::rule!({ ($crate::rule!($a)).to($crate::rule!(@AS_EXPR $b)) } $($tail)*)
-    };
-    ( $a:tt => $b:tt $($tail:tt)* ) => {
-        $crate::rule!({ ($crate::rule!($a)).map($crate::rule!(@AS_EXPR $b)) } $($tail)*)
-    };
-    ( $a:tt . $method:ident ( $($args:tt)* ) $($tail:tt)* ) => {
-        $crate::rule!({ ($crate::rule!($a)).$method($($args)*) } $($tail)*)
-    };
-
-    // High-precedence operators
-
-    ( $a:tt -& $b:tt $($tail:tt)* ) => {
-        $crate::rule!({ ($crate::rule!($a)).delimiter_for($crate::rule!($b)) } $($tail)*)
-    };
-    ( $a:tt &- $b:tt $($tail:tt)* ) => {
-        $crate::rule!({ ($crate::rule!($a)).delimited_by($crate::rule!($b)) } $($tail)*)
-    };
-    ( $a:tt & $b:tt $($tail:tt)* ) => {
-        $crate::rule!({ ($crate::rule!($a)).then($crate::rule!($b)) } $($tail)*)
-    };
-    ( $a:tt % $b:tt $($tail:tt)* ) => {
-        $crate::rule!({ ($crate::rule!($a)).chain($crate::rule!($b)) } $($tail)*)
-    };
-    ( $a:tt ... $b:tt $($tail:tt)* ) => {
-        $crate::rule!({ ($crate::rule!($a)).separated_by($crate::rule!($b)) } $($tail)*)
-    };
-
-    // Repetition
-
-    ( $a:tt *= $b:tt $($tail:tt)* ) => {
-        $crate::rule!({ ($crate::rule!($a)).repeat($crate::rule!(@AS_EXPR $b)) } $($tail)*)
-    };
-    ( $a:tt * $($tail:tt)* ) => {
-        $crate::rule!({ ($crate::rule!($a)).repeat(..) } $($tail)*)
-    };
-    ( $a:tt + $($tail:tt)* ) => {
-        $crate::rule!({ ($crate::rule!($a)).repeat(1..) } $($tail)*)
-    };
-    ( $a:tt ? $($tail:tt)* ) => {
-        $crate::rule!({ ($crate::rule!($a)).or_not() } $($tail)*)
-    };
-
-    // Low-precedence operators
-
-    ( $a:tt | $($b:tt)* ) => {
-        { ($crate::rule!($a)).or($crate::rule!($($b)*)) }
-    };
-
-    // Ignore prefix operators
-
-    ( | $($a:tt)* ) => {
-        $crate::rule!($($a)*)
-    };
-    ( & $($a:tt)* ) => {
-        $crate::rule!($($a)*)
-    };
-
-    ( $x:tt ) => { $x };
-
-    ( $($tail:tt)* ) => {
-        $crate::parze_error!($($tail)*);
-    };
 }
 
 /// A macro to define recursive parsers.
@@ -780,6 +718,9 @@ macro_rules! rule {
 /// # Example
 ///
 /// ```
+/// #![cfg(feature = "macros")]
+/// #![feature(proc_macro_hygiene)]
+///
 /// use parze::prelude::*;
 ///
 /// parsers! {
@@ -792,6 +733,7 @@ macro_rules! rule {
 ///     }
 /// }
 /// ```
+#[cfg(feature = "macros")]
 #[macro_export]
 macro_rules! parsers {
     ( @NAMES ) => {};
