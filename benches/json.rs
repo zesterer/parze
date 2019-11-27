@@ -1,3 +1,6 @@
+#![cfg(feature = "macros")]
+#![feature(proc_macro_hygiene)]
+
 #![feature(test)]
 
 extern crate test;
@@ -28,14 +31,6 @@ fn pom(b: &mut Bencher) {
     b.iter(|| black_box(json.parse(include_bytes!("sample.json")).unwrap()));
 }
 
-/*
-#[bench]
-fn nom(b: &mut Bencher) {
-    //b.iter(|| black_box(nom::root(include_str!("sample.json")).unwrap()));
-    dbg!(nom::root(include_str!("small_sample.json")).unwrap());
-}
-*/
-
 mod parze {
     use parze::prelude::*;
 
@@ -43,59 +38,38 @@ mod parze {
     use super::JsonValue;
 
     pub fn json() -> Parser<'static, u8, JsonValue> {
-        recursive(|value| {
-            let integer = one_of(b"123456789").chained()
-                .chain(one_of(b"0123456789").repeat(..))
-                .or_chain(sym(b'0').chained());
-            let frac = sym(b'.').chained()
-                .chain(one_of(b"0123456789").repeat(1..));
-            let exp = one_of(b"eE").chained()
-                .chain(one_of(b"+-").or_not())
-                .chain(one_of(b"0123456789").repeat(1..));
-            let number = sym(b'-').or_not()
-                .chain(integer)
-                .chain(frac.or_not().flatten())
-                .chain(exp.or_not().flatten())
-                .map(|bs| str::from_utf8(&bs.as_slice()).unwrap().parse().unwrap());
+        parsers! {
+            integer = { { one_of(b"123456789") }.% % { one_of(b"0123456789") }* |% b'0'.% }
+            frac = { b'.'.% % { one_of(b"0123456789") }+ }
+            exp = { (b'e' | b'E').% % (b'+' | b'-')? % { one_of(b"0123456789") }+ }
+            number = { b'-'? % integer % frac?.# % exp?.# => { |b| str::from_utf8(&b.as_slice()).unwrap().parse().unwrap() } }
 
-            let special_char = sym(b'\\')
-                .or(sym(b'/'))
-                .or(sym(b'"'))
-                .or(sym(b'b').to(b'\x08'))
-                .or(sym(b'f').to(b'\x0C'))
-                .or(sym(b'n').to(b'\n'))
-                .or(sym(b'r').to(b'\r'))
-                .or(sym(b't').to(b'\t'));
-            let escape_seq = sym(b'\\').delimiter_for(special_char);
-            let string = sym(b'"')
-                .delimiter_for(none_of(b"\\\"").or(escape_seq).repeat(0..))
-                .delimited_by(sym(b'"'))
-                .map(|bs| String::from_utf8(bs).unwrap());
+            special = { b'\\' | b'/' | b'"' | b'b' -> b'\x08' | b'f' -> b'\x0C' | b'n' -> b'\n' | b'r' -> b'\r' | b't' -> b'\t' }
+            escape = { b'\\' -& special }
+            string = { b'"' -& ({ none_of(b"\\\"") } | escape)* &- b'"' => { |b| String::from_utf8(b).unwrap() } }
 
-            let elements = value.link().separated_by(sym(b',').padded());
-            let array = sym(b'[').padded()
-                .delimiter_for(elements)
-                .delimited_by(sym(b']'));
+            elements = { value ... b','~ }
+            array = { b'['~ -& elements &- b']' }
 
-            let member = string.clone().padded()
-                .delimited_by(sym(b':').padded())
-                .then(value.link());
-            let members = member.separated_by(sym(b',').padded());
-            let object = sym(b'{').padded()
-                .delimiter_for(members)
-                .delimited_by(sym(b'}'))
-                .collect();
+            member = { string~ &- b':'~ & value }
+            members = { member ... b','~ }
 
-            padding().delimiter_for(
-                    all_of(b"null").map(|_| JsonValue::Null)
-                .or(all_of(b"true").map(|_| JsonValue::Bool(true)))
-                .or(all_of(b"false").map(|_| JsonValue::Bool(false)))
-                .or(number.map(|n| JsonValue::Num(n)))
-                .or(string.map(|s| JsonValue::Str(s)))
-                .or(array.map(|a| JsonValue::Array(a)))
-                .or(object.map(|o| JsonValue::Object(o)))
-            ).padded()
-        })
+            object = { b'{'~ -& members &- b'}' => { |m| m.into_iter().collect() } }
+
+            value = {
+                ~(
+                    | { all_of(b"null") } => { |_| JsonValue::Null }
+                    | { all_of(b"true") } => { |_| JsonValue::Bool(true) }
+                    | { all_of(b"false") } => { |_| JsonValue::Bool(false) }
+                    | number => { |n| JsonValue::Num(n) }
+                    | string => { |s| JsonValue::Str(s) }
+                    | array => { |a| JsonValue::Array(a) }
+                    | object => { |o| JsonValue::Object(o) }
+                )~
+            }
+        }
+
+        value
     }
 }
 
@@ -155,102 +129,3 @@ mod pom {
         space() * value() - end()
     }
 }
-
-/*
-// TODO: Find a nom JSON parser that actually works
-mod nom {
-    extern crate nom;
-
-    use nom::{
-        branch::alt,
-        bytes::complete::{escaped, tag, take_while},
-        character::complete::{char, one_of, none_of},
-        combinator::{map, opt, cut},
-        error::{context, VerboseError},
-        multi::separated_list,
-        number::complete::double,
-        sequence::{delimited, preceded, separated_pair, terminated},
-        IResult,
-    };
-    use std::collections::HashMap;
-    use std::str;
-    use super::JsonValue;
-
-    fn sp<'a>(i: &'a str) -> IResult<&'a str, &'a str, VerboseError<&'a str>> {
-      let chars = " \t\r\n";
-
-      take_while(move |c| chars.contains(c))(i)
-    }
-
-    fn parse_str<'a>(i: &'a str) -> IResult<&'a str, &'a str, VerboseError<&'a str>> {
-      escaped(none_of("\"\\"), '\\', one_of("\"n\\"))(i)
-    }
-
-    fn boolean<'a>(input: &'a str) -> IResult<&'a str, bool, VerboseError<&'a str>> {
-      alt((
-          map(tag("false"), |_| false),
-          map(tag("true"), |_| true)
-      ))(input)
-    }
-
-    fn string<'a>(i: &'a str) -> IResult<&'a str, &'a str, VerboseError<&'a str>> {
-      context("string",
-        preceded(
-          char('\"'),
-          cut(terminated(
-              parse_str,
-              char('\"')
-      ))))(i)
-    }
-
-    fn array<'a>(i: &'a str) -> IResult<&'a str, Vec<JsonValue>, VerboseError<&'a str>> {
-      context(
-        "array",
-        preceded(char('['),
-        cut(terminated(
-          separated_list(preceded(sp, char(',')), value),
-          preceded(sp, char(']'))))
-      ))(i)
-    }
-
-    fn key_value<'a>(i: &'a str) -> IResult<&'a str, (&'a str, JsonValue), VerboseError<&'a str>> {
-    separated_pair(preceded(sp, string), cut(preceded(sp, char(':'))), value)(i)
-    }
-
-    fn hash<'a>(i: &'a str) -> IResult<&'a str, HashMap<String, JsonValue>, VerboseError<&'a str>> {
-      context(
-        "map",
-        preceded(char('{'),
-        cut(terminated(
-          map(
-            separated_list(preceded(sp, char(',')), key_value),
-            |tuple_vec| {
-              tuple_vec.into_iter().map(|(k, v)| (String::from(k), v)).collect()
-          }),
-          preceded(sp, char('}')),
-        ))
-      ))(i)
-    }
-
-    pub fn value<'a>(i: &'a str) -> IResult<&'a str, JsonValue, VerboseError<&'a str>> {
-      preceded(
-        sp,
-        alt((
-          map(hash, JsonValue::Object),
-          map(array, JsonValue::Array),
-          map(string, |s| JsonValue::Str(String::from(s))),
-          map(double, JsonValue::Num),
-          map(boolean, JsonValue::Bool),
-        )),
-      )(i)
-    }
-
-    pub fn root<'a>(i: &'a str) -> IResult<&'a str, JsonValue, VerboseError<&'a str>> {
-      delimited(
-        sp,
-        alt((map(hash, JsonValue::Object), map(array, JsonValue::Array))),
-        opt(sp),
-      )(i)
-    }
-}
-*/

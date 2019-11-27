@@ -62,10 +62,13 @@ mod fail;
 /// | x *        | any            | Equivalent to `x.repeat(..)`          |
 /// | x +        | at least one   | Equivalent to `x.repeat(1..)`         |
 /// | x ?        | optional       | Equivalent to `x.or_not()`            |
+/// | x .%       | chained        | Equivalent to `x.chained()`           |
+/// | x .#       | flatten        | Equivalent to `x.flatten()`           |
 /// | x ... y    | separated      | Equivalent to `x.separated_by(y)`     |
 /// | x & y      | then           | Equivalent to `x.then(y)`             |
-/// | x -& y     | delimiter for  | Equivalent to `x.delimiter_for(y)`    |
 /// | x % y      | chain          | Equivalent to `x.chain(y)`            |
+/// | x |% y     | or chain       | Equivalent to `x.or_chain(y)`         |
+/// | x -& y     | delimiter for  | Equivalent to `x.delimiter_for(y)`    |
 /// | x &- y     | delimited by   | Equivalent to `x.delimited_by(y)`     |
 /// | x -> Y     | to             | Equivalent to `x.to(y)`               |
 /// | x => F     | map            | Equivalent to `x.map(F)`              |
