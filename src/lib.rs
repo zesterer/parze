@@ -467,12 +467,13 @@ pub struct Declaration<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> = DefaultP
     parser: Rc<RefCell<Option<Parser<'a, T, O, E>>>>,
 }
 
-impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Declaration<'a, T, O, E> {
-    /// Create a new parser declaration.
-    pub fn new() -> Self {
+impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T>> Default for Declaration<'a, T, O, E> {
+    fn default() -> Self {
         Self { parser: Rc::new(RefCell::new(None)) }
     }
+}
 
+impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Declaration<'a, T, O, E> {
     /// Create a parser that is linked to this declaration.
     /// If the resultant parser is used before this declaration is defined (see `.define`) then a panic will occur.
     pub fn link(&self) -> Parser<'a, T, O, E> {
@@ -493,14 +494,14 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Declaration<'a, T, O, 
 ///
 /// This function is generally used to create recursive parsers, along with `call`.
 pub fn declare<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a>() -> Declaration<'a, T, O, E> {
-    Declaration::new()
+    Declaration::default()
 }
 
 /// A wrapper function for recursive parser declarations.
 ///
 /// This function uses `Declaration` internally.
 pub fn recursive<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a>(f: impl FnOnce(Parser<'a, T, O, E>) -> Parser<'a, T, O, E> + 'a) -> Parser<'a, T, O, E> {
-    let p = Declaration::new();
+    let p = Declaration::default();
     let p_link = p.link();
     p.define(f(p_link))
 }
@@ -519,7 +520,7 @@ fn attempt<'a, T: Clone + 'a, R, F, E: ParseError<'a, T> + 'a>(tokens: &mut Toke
 fn try_parse<'a, T: Clone + 'a, R, F, E: ParseError<'a, T> + 'a>(tokens: &mut TokenIter<T>, f: F) -> Result<(MayFail<E>, R), Fail<E>>
     where F: FnOnce((usize, T), &mut TokenIter<T>) -> Result<(MayFail<E>, R), Fail<E>>,
 {
-    attempt(tokens, |tokens| f(tokens.next().ok_or(Fail::new(!0, E::unexpected_end()))?, tokens))
+    attempt(tokens, |tokens| f(tokens.next().ok_or_else(|| Fail::new(!0, E::unexpected_end()))?, tokens))
 }
 
 // Utility
