@@ -42,7 +42,7 @@ mod parze {
             integer = { { one_of(b"123456789") }.% % { one_of(b"0123456789") }* |% b'0'.% }
             frac = { b'.'.% % { one_of(b"0123456789") }+ }
             exp = { (b'e' | b'E').% % (b'+' | b'-')? % { one_of(b"0123456789") }+ }
-            number = { b'-'? % integer % frac?.# % exp?.# => { |b| str::from_utf8(&b.as_slice()).unwrap().parse().unwrap() } }
+            number: Parser<_, _, _, _> = { b'-'? % integer % frac?.# % exp?.# => { |b| str::from_utf8(&b.as_slice()).unwrap().parse().unwrap() } }
 
             special = { b'\\' | b'/' | b'"' | b'b' -> b'\x08' | b'f' -> b'\x0C' | b'n' -> b'\n' | b'r' -> b'\r' | b't' -> b'\t' }
             escape = { b'\\' -& special }

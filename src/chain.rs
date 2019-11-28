@@ -12,7 +12,7 @@ impl<T> Chain for Vec<T> {
     fn as_slice(&self) -> &[Self::Item] { &self }
 }
 
-pub(crate) struct Single<T>([T; 1]);
+pub struct Single<T>([T; 1]);
 
 impl<T> From<T> for Single<T> {
     fn from(item: T) -> Self {

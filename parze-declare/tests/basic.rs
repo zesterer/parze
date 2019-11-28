@@ -1,7 +1,6 @@
 #![feature(proc_macro_hygiene)]
 
 use parze::prelude::*;
-use parze_declare::*;
 
 #[test]
 fn basic() {
@@ -17,8 +16,7 @@ fn basic() {
     }
 
     let bf: Parser<_, _> = recursive(|bf| rule! {
-        (
-        | '+' -> { Instr::Add }
+        ( '+' -> { Instr::Add }
         | '-' -> { Instr::Sub }
         | '<' -> { Instr::Left }
         | '>' -> { Instr::Right }

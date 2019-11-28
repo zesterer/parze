@@ -45,6 +45,7 @@ pub mod also;
 pub mod reduce;
 pub mod pad;
 pub mod chain;
+pub mod parse_fn;
 mod fail;
 
 // Reexports
@@ -64,6 +65,7 @@ mod fail;
 /// | x ?        | optional       | Equivalent to `x.or_not()`            |
 /// | x .%       | chained        | Equivalent to `x.chained()`           |
 /// | x .#       | flatten        | Equivalent to `x.flatten()`           |
+/// | x .@       | link           | Equivalent to `x.link()`              |
 /// | x ... y    | separated      | Equivalent to `x.separated_by(y)`     |
 /// | x & y      | then           | Equivalent to `x.then(y)`             |
 /// | x % y      | chain          | Equivalent to `x.chain(y)`            |
@@ -84,7 +86,7 @@ use core::{
     iter::{self, FromIterator},
     cell::RefCell,
     borrow::Borrow,
-    //marker::PhantomData,
+    marker::PhantomData,
     //ops::{Add, BitOr, Mul, Rem, Sub, Shl, Shr, Not},
 };
 use crate::{
@@ -95,6 +97,7 @@ use crate::{
     reduce::{ReduceLeft, ReduceRight},
     pad::Padded,
     chain::{Chain, IntoChain, Single},
+    parse_fn::{ParseFn, RcParseFn, GenParseFn},
 };
 
 type TokenIter<'a, T> = iter::Enumerate<iter::Cloned<slice::Iter<'a, T>>>;
@@ -104,13 +107,23 @@ type ParseResult<O, E> = Result<(MayFail<E>, O), Fail<E>>;
 /// A type that represents a rule that may be used to parse a list of symbols.
 ///
 /// Parsers may be combined and manipulated in various ways to create new parsers.
-pub struct Parser<'a, T: Clone + 'a, O: 'a = T, E: ParseError<'a, T> + 'a = DefaultParseError<T>> {
-    f: Rc<dyn Fn(&mut TokenIter<T>) -> ParseResult<O, E> + 'a>,
+pub struct Parser<
+    'a,
+    T: Clone + 'a,
+    O: 'a = T,
+    E: ParseError<'a, T> + 'a = DefaultParseError<T>,
+    F: ParseFn<'a, T, O, E> + 'a = RcParseFn<'a, T, O, E>,
+> {
+    f: F,
+    _phantom: PhantomData<&'a (T, O, E)>,
 }
 
-impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Clone for Parser<'a, T, O, E> {
+impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a, F: ParseFn<'a, T, O, E> + 'a> Clone for Parser<'a, T, O, E, F> {
     fn clone(&self) -> Self {
-        Self { f: self.f.clone() }
+        Self {
+            f: self.f.clone(),
+            _phantom: PhantomData,
+        }
     }
 }
 
@@ -169,65 +182,91 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Not for Parser<'a, T, 
 */
 
 impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
-    // Constructor methods
-
     fn raw(f: impl Fn(&mut TokenIter<T>) -> ParseResult<O, E> + 'a) -> Self {
-        Self { f: Rc::new(f) }
+        Parser {
+            f: RcParseFn::new(f),
+            _phantom: PhantomData,
+        }
     }
 
-    fn custom(f: impl Fn(&mut TokenIter<T>) -> ParseResult<O, E> + 'a) -> Self {
+    fn dynamic(f: impl Fn(&mut TokenIter<T>) -> ParseResult<O, E> + 'a) -> Self {
         Self::raw(move |tokens| attempt(tokens, &f))
     }
 
+    fn generic<'b>(f: impl Fn(&mut TokenIter<T>) -> ParseResult<O, E> + Clone + 'a) -> Parser<'b, T, O, E, impl ParseFn<'b, T, O, E> + Captures<'b> + 'a>
+        where 'a: 'b, 'b: 'a
+    {
+        Parser {
+            f: GenParseFn::new(f),
+            _phantom: PhantomData,
+        }
+    }
+
     fn try_map(f: impl Fn(T) -> Result<O, E> + 'a) -> Self {
-        Self::raw(move |tokens| try_parse(tokens, |(idx, tok), _| {
+        Self::raw(move |tokens: &mut TokenIter<T>| try_parse(tokens, |(idx, tok), _| {
             match f(tok.clone()) {
                 Ok(output) => Ok((MayFail::none(), output)),
                 Err(err) => Err(Fail::new(idx, err)),
             }
         }))
     }
+}
 
-    fn call(f: impl Fn() -> Self + 'a) -> Self {
-        Self::custom(move |tokens| (f().f)(tokens))
+pub trait Captures<'a> {}
+impl<'a, T: ?Sized> Captures<'a> for T {}
+
+impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a, F: ParseFn<'a, T, O, E> + 'a> Parser<'a, T, O, E, F> {
+    fn call(f: impl Fn() -> Self + 'a) -> Parser<'a, T, O, E> {
+        Parser::dynamic(move |tokens| f().f.parse(tokens))
     }
 
-    // Undocumented
-    pub fn link(&self) -> Self {
-        self.clone()
+    /// Convert this parser into one with a standard payload that may be accepted by more functions
+    pub fn link(&self) -> Parser<'a, T, O, E> {
+        let this = self.clone();
+        Parser::raw(move |tokens| this.f.parse(tokens))
     }
 
     // Combinator methods
 
     /// Map the output of this parser to another value with the given function.
-    pub fn map<U: 'a>(self, f: impl Fn(O) -> U + 'a) -> Parser<'a, T, U, E> {
-        Parser::custom(move |tokens| (self.f)(tokens).map(|(e, o)| (e, f(o))))
+    pub fn map<'b, U: 'a>(self, f: impl Fn(O) -> U + Clone + 'a) -> Parser<'a, T, U, E, impl ParseFn<'b, T, U, E> + Captures<'b> + 'a>
+        where 'a: 'b, 'b: 'a
+    {
+        Parser::generic(move |tokens| self.f.parse(tokens).map(|(e, o)| (e, f(o))))
     }
 
     /// Map the error of this parser to another with the given function.
     ///
     /// This may be used to annotate an error with contextual information at some stage of parsing.
-    pub fn map_err<G: ParseError<'a, T> + 'a>(self, f: impl Fn(E) -> G + 'a) -> Parser<'a, T, O, G> {
-        Parser::custom(move |tokens| match (self.f)(tokens) {
+    pub fn map_err<'b, G: ParseError<'a, T> + 'a>(self, f: impl Fn(E) -> G + Clone + 'a) -> Parser<'a, T, O, G, impl ParseFn<'b, T, O, G> + Captures<'b> + 'a>
+        where 'a: 'b, 'b: 'a
+    {
+        Parser::generic(move |tokens| match self.f.parse(tokens) {
             Ok((fail, output)) => Ok((fail.map_err(&f), output)),
             Err(fail) => Err(fail.map_err(&f)),
         })
     }
 
     /// Discard the output of this parser (i.e: create a parser that outputs `()` instead).
-    pub fn discard(self) -> Parser<'a, T, (), E> {
+    pub fn discard<'b>(self) -> Parser<'a, T, (), E, impl ParseFn<'b, T, (), E> + Captures<'b> + 'a>
+        where 'a: 'b, 'b: 'a
+    {
         self.map(|_| ())
     }
 
     /// Map all outputs of this parser to the given value.
-    pub fn to<U: Clone + 'a>(self, to: U) -> Parser<'a, T, U, E> {
+    pub fn to<'b, U: Clone + 'a>(self, to: U) -> Parser<'a, T, U, E, impl ParseFn<'b, T, U, E> + Captures<'b> + 'a>
+        where 'a: 'b, 'b: 'a
+    {
         self.map(move |_| to.clone())
     }
 
     /// Create a parser that optionally parses symbols that match this parser.
-    pub fn or_not(self) -> Parser<'a, T, Option<O>, E> {
-        Parser::custom(move |tokens| {
-            match (self.f)(tokens) {
+    pub fn or_not<'b>(self) -> Parser<'a, T, Option<O>, E, impl ParseFn<'b, T, Option<O>, E> + Captures<'b> + 'a>
+        where 'a: 'b, 'b: 'a
+    {
+        Parser::generic(move |tokens| {
+            match self.f.parse(tokens) {
                 Ok((fail, output)) => Ok((fail, Some(output))),
                 Err(fail) => Ok((fail.into(), None)),
             }
@@ -235,11 +274,12 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
     }
 
     /// Create a parser that parses symbols that match this parser and then another parser.
-    pub fn then<U: 'a>(self, other: impl Into<Parser<'a, T, U, E>>) -> Parser<'a, T, (O, U), E> {
-        let other = other.into();
-        Parser::custom(move |tokens| {
-            let (a_fail, a) = (self.f)(tokens)?;
-            match (other.f)(tokens) {
+    pub fn then<'b, U: 'b, G: ParseFn<'b, T, U, E> + 'b>(self, other: Parser<'a, T, U, E, G>) -> Parser<'a, T, (O, U), E, impl ParseFn<'b, T, (O, U), E> + Captures<'b> + 'a>
+        where 'a: 'b, 'b: 'a
+    {
+        Parser::generic(move |tokens| {
+            let (a_fail, a) = self.f.parse(tokens)?;
+            match other.f.parse(tokens) {
                 Ok((b_fail, b)) => Ok((a_fail.max(b_fail), (a, b))),
                 Err(b_fail) => Err(b_fail.max(a_fail)),
             }
@@ -250,11 +290,12 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
     ///
     /// Whereas `.then` turns outputs of `(T, U)` and `V` into `((T, U), V)`, this method turns them into `(T, U, V)`.
     /// Due to current limitations in Rust's type system, this method is significantly less useful than it could be.
-    pub fn also<U: 'a>(self, other: impl Into<Parser<'a, T, U, E>>) -> Parser<'a, T, O::Alsoed, E> where O: Also<U> {
-        let other = other.into();
-        Parser::custom(move |tokens| {
-            let (a_fail, a) = (self.f)(tokens)?;
-            match (other.f)(tokens) {
+    pub fn also<'b, U: 'a>(self, other: Parser<'a, T, U, E, impl ParseFn<'a, T, U, E>>) -> Parser<'a, T, O::Alsoed, E, impl ParseFn<'b, T, O::Alsoed, E> + Captures<'b> + 'a>
+        where O: Also<U>, 'a: 'b, 'b: 'a
+    {
+        Parser::generic(move |tokens| {
+            let (a_fail, a) = self.f.parse(tokens)?;
+            match other.f.parse(tokens) {
                 Ok((b_fail, b)) => Ok((a_fail.max(b_fail), a.also(b))),
                 Err(b_fail) => Err(b_fail.max(a_fail)),
             }
@@ -274,31 +315,32 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
     ///
     /// This is most useful when you wish to use singular outputs as part of a chain.
     pub fn chained(self) -> Parser<'a, T, impl Chain<Item=O>, E> {
-        self.map(|output| Single::from(output))
+        self.map(|output| Single::from(output)).link()
     }
 
     /// Create a parser that parses symbols that match this parser and then another parser.
     ///
     /// Unlike `.then`, this method will chain the two parser outputs together as a vector.
-    pub fn chain<U: 'a, V: 'a>(self, other: impl Into<Parser<'a, T, U, E>>) -> Parser<'a, T, impl Chain<Item=V>, E>
+    pub fn chain<U: 'a, V: 'a, G: ParseFn<'a, T, U, E> + 'a>(self, other: Parser<'a, T, U, E, G>) -> Parser<'a, T, impl Chain<Item=V>, E>
         where O: IntoChain<Item=V>, U: IntoChain<Item=V>
     {
-        self.then(other.into()).map(|(a, b)| a.into_chain().into_iter_chain().chain(b.into_chain().into_iter_chain()).collect::<Vec<_>>())
+        self.then(other.into()).map(|(a, b)| a.into_chain().into_iter_chain().chain(b.into_chain().into_iter_chain()).collect::<Vec<_>>()).link()
     }
 
     /// Create a parser that with a flatter output than this parser.
     pub fn flatten<U: 'a, V: 'a>(self) -> Parser<'a, T, impl Chain<Item=V>, E>
         where O: IntoChain<Item=U>, U: IntoChain<Item=V>
     {
-        self.map(|a| a.into_chain().into_iter_chain().map(|a| a.into_chain().into_iter_chain()).flatten().collect::<Vec<_>>())
+        self.map(|a| a.into_chain().into_iter_chain().map(|a| a.into_chain().into_iter_chain()).flatten().collect::<Vec<_>>()).link()
     }
 
     /// Create a parser that parses symbols that match this parser and then another parser, discarding the output of this parser.
-    pub fn delimiter_for<U: 'a>(self, other: impl Into<Parser<'a, T, U, E>>) -> Parser<'a, T, U, E> {
-        let other = other.into();
-        Parser::custom(move |tokens| {
-            let (a_fail, _) = (self.f)(tokens)?;
-            match (other.f)(tokens) {
+    pub fn delimiter_for<'b, U: 'a>(self, other: Parser<'a, T, U, E, impl ParseFn<'a, T, U, E>>) -> Parser<'a, T, U, E, impl ParseFn<'b, T, U, E> + Captures<'b> + 'a>
+        where 'a: 'b, 'b: 'a
+    {
+        Parser::generic(move |tokens| {
+            let (a_fail, _) = self.f.parse(tokens)?;
+            match other.f.parse(tokens) {
                 Ok((b_fail, b)) => Ok((a_fail.max(b_fail), b)),
                 Err(b_fail) => Err(b_fail.max(a_fail)),
             }
@@ -306,11 +348,12 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
     }
 
     /// Create a parser that parses symbols that match this parser and then another parser, discarding the output of the other parser.
-    pub fn delimited_by<U: 'a>(self, other: impl Into<Parser<'a, T, U, E>>) -> Self {
-        let other = other.into();
-        Parser::custom(move |tokens| {
-            let (a_fail, a) = (self.f)(tokens)?;
-            match (other.f)(tokens) {
+    pub fn delimited_by<'b, U: 'a>(self, other: Parser<'a, T, U, E, impl ParseFn<'a, T, U, E>>) -> Parser<'a, T, O, E, impl ParseFn<'b, T, O, E> + Captures<'b> + 'a>
+        where 'a: 'b, 'b: 'a
+    {
+        Parser::generic(move |tokens| {
+            let (a_fail, a) = self.f.parse(tokens)?;
+            match other.f.parse(tokens) {
                 Ok((b_fail, _)) => Ok((a_fail.max(b_fail), a)),
                 Err(b_fail) => Err(b_fail.max(a_fail)),
             }
@@ -318,13 +361,15 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
     }
 
     /// Create a parser that accepts the valid input of this parser separated by the valid input of another.
-    pub fn separated_by<U: 'a>(self, other: Parser<'a, T, U, E>) -> Parser<'a, T, Vec<O>, E> {
-        Parser::custom(move |tokens| {
+    pub fn separated_by<'b, U: 'a>(self, other: Parser<'a, T, U, E, impl ParseFn<'a, T, U, E>>) -> Parser<'a, T, Vec<O>, E, impl ParseFn<'b, T, Vec<O>, E> + Captures<'b> + 'a>
+        where 'a: 'b, 'b: 'a
+    {
+        Parser::generic(move |tokens| {
             let mut max_err = MayFail::none();
             let mut outputs = Vec::new();
 
             for i in 0.. {
-                match (self.f)(tokens) {
+                match self.f.parse(tokens) {
                     Ok((err, output)) => {
                         max_err = max_err.max(err);
                         outputs.push(output);
@@ -336,7 +381,7 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
                     Err(err) => return Err(err.max(max_err)),
                 }
 
-                match (other.f)(tokens) {
+                match other.f.parse(tokens) {
                     Ok((err, _)) => max_err = max_err.max(err),
                     Err(err) => {
                         max_err = max_err.max(err);
@@ -354,31 +399,39 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
     /// Create a parser that parses character-like symbols that match this parser followed or preceded by any number of 'padding' (usually taken to mean whitespace) symbols.
     ///
     /// You can implement the `Padded` trait for your own symbol types to use this method with them.
-    pub fn padded<U: Padded>(self) -> Self where T: Borrow<U> {
+    pub fn padded<'b, U: Padded>(self) -> Parser<'a, T, O, E, impl ParseFn<'b, T, O, E> + Captures<'b> + 'a>
+        where T: Borrow<U>, 'a: 'b, 'b: 'a
+    {
         self.before_padding().after_padding()
     }
 
     /// Create a parser that parses any symbols that match this parser followed by any number of 'padding' (usually taken to mean whitespace) symbols.
     ///
     /// You can implement the `Padded` trait for your own symbol types to use this method with them.
-    pub fn before_padding<U: Padded>(self) -> Self where T: Borrow<U> {
+    pub fn before_padding<'b, U: Padded>(self) -> Parser<'a, T, O, E, impl ParseFn<'b, T, O, E> + Captures<'b> + 'a>
+        where T: Borrow<U>, 'a: 'b, 'b: 'a
+    {
         self.delimited_by(padding())
     }
 
     /// Create a parser that parses any number of 'padding' (usually taken to mean whitespace) symbols followed by any symbols that match this parser.
     ///
     /// You can implement the `Padded` trait for your own symbol types to use this method with them.
-    pub fn after_padding<U: Padded>(self) -> Self where T: Borrow<U> {
+    pub fn after_padding<'b, U: Padded>(self) -> Parser<'a, T, O, E, impl ParseFn<'b, T, O, E> + Captures<'b> + 'a>
+        where T: Borrow<U>, 'a: 'b, 'b: 'a
+    {
         padding().delimiter_for(self)
     }
 
     /// Create a parser that parses symbols that match this parser or another parser.
-    pub fn or(self, other: impl Into<Parser<'a, T, O, E>>) -> Self {
-        let other = other.into();
-        Parser::custom(move |tokens| {
-            let a = (self.f)(tokens);
+    pub fn or<'b>(self, other: Parser<'b, T, O, E, impl ParseFn<'b, T, O, E>>) -> Parser<'b, T, O, E, impl ParseFn<'b, T, O, E> + Captures<'b> + 'a>
+        where 'a: 'b, 'b: 'a
+    {
+        // TODO: Switch to generic when Rust gets better at handling large types
+        Parser::dynamic(move |tokens| {
+            let a = self.f.parse(tokens);
             let mut b_tokens = tokens.clone();
-            let b = (other.f)(&mut b_tokens);
+            let b = other.f.parse(&mut b_tokens);
             match a {
                 Ok((a_fail, a)) => match b {
                     Ok((b_fail, _)) => Ok((a_fail.max(b_fail), a)),
@@ -396,14 +449,13 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
     }
 
     /// Create a parser that parses symbols that match this parser or another parser where both parsers are chains.
-    pub fn or_chain<U, V: 'a>(self, other: impl Into<Parser<'a, T, V, E>>) -> Parser<'a, T, impl Chain<Item=U>, E>
-        where V: IntoChain<Item=U>, O: IntoChain<Item=U>
+    pub fn or_chain<'b, U, V: 'b, G: ParseFn<'b, T, V, E>>(self, other: Parser<'b, T, V, E, G>) -> Parser<'b, T, impl Chain<Item=U>, E>
+        where V: IntoChain<Item=U>, O: IntoChain<Item=U>, 'a: 'b, 'b: 'a
     {
-        let other = other.into();
-        Parser::custom(move |tokens| {
-            let a = (self.f)(tokens);
+        Parser::dynamic(move |tokens| {
+            let a = self.f.parse(tokens);
             let mut b_tokens = tokens.clone();
-            let b = (other.f)(&mut b_tokens);
+            let b = other.f.parse(&mut b_tokens);
             match a {
                 Ok((a_fail, a)) => match b {
                     Ok((b_fail, _)) => Ok((a_fail.max(b_fail), a.into_chain().into_iter_chain().collect::<Vec<_>>())),
@@ -424,13 +476,15 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
     ///
     /// This method is 'short-circuiting': if this parser succeeds, the fallback parser won't even be invoked.
     /// This means that emitted errors may not include information from the fallback parser.
-    pub fn or_fallback(self, other: impl Into<Parser<'a, T, O, E>>) -> Self {
-        let other = other.into();
-        Parser::custom(move |tokens| {
-            let a = (self.f)(tokens);
+    pub fn or_fallback<'b, G: ParseFn<'b, T, O, E>>(self, other: Parser<'a, T, O, E, G>) -> Parser<'b, T, O, E, impl ParseFn<'b, T, O, E> + Captures<'b> + 'a>
+        where 'a: 'b, 'b: 'a
+    {
+        // TODO: Switch to generic when Rust gets better at handling large types
+        Parser::dynamic(move |tokens| {
+            let a = self.f.parse(tokens);
             match a {
                 Ok((a_fail, a)) => Ok((a_fail, a)),
-                Err(a_fail) => match (other.f)(tokens) {
+                Err(a_fail) => match other.f.parse(tokens) {
                     Ok((b_fail, b)) => Ok((b_fail.max(a_fail), b)),
                     Err(b_fail) => Err(a_fail.max(b_fail)),
                 },
@@ -439,14 +493,16 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
     }
 
     /// Create a parser that parses symbols that match this parser multiple times, according to the given repetition rule.
-    pub fn repeat(self, repeat: impl Into<Repeat>) -> Parser<'a, T, Vec<O>, E> {
+    pub fn repeat<'b>(self, repeat: impl Into<Repeat>) -> Parser<'a, T, Vec<O>, E, impl ParseFn<'b, T, Vec<O>, E> + Captures<'b> + 'a>
+        where 'a: 'b, 'b: 'a
+    {
         let repeat = repeat.into();
-        Parser::custom(move |tokens| {
+        Parser::generic(move |tokens| {
             let mut max_err = MayFail::none();
             let mut outputs = Vec::new();
 
             for i in 0..repeat.idx_upper_limit() {
-                match (self.f)(tokens) {
+                match self.f.parse(tokens) {
                     Ok((err, output)) => {
                         max_err = max_err.max(err);
                         outputs.push(output);
@@ -464,24 +520,30 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
     }
 
     /// Create a parser that parses symbols that match this parser and then another parser.
-    pub fn collect<U: FromIterator<O::Item>>(self) -> Parser<'a, T, U, E> where O: IntoIterator {
+    pub fn collect<'b, U: FromIterator<O::Item>>(self) -> Parser<'a, T, U, E, impl ParseFn<'b, T, U, E> + Captures<'b> + 'a>
+        where O: IntoIterator, 'a: 'b, 'b: 'a
+    {
         self.map(|output| output.into_iter().collect())
     }
 
     /// Create a parser that left-reduces this parser down into another type according to the given reduction function.
-    pub fn reduce_left<A, B>(self, f: impl Fn(B, A) -> A + 'a) -> Parser<'a, T, A, E> where O: ReduceLeft<A, B> {
+    pub fn reduce_left<'b, A, B>(self, f: impl Fn(B, A) -> A + Clone + 'a) -> Parser<'a, T, A, E, impl ParseFn<'b, T, A, E> + Captures<'b> + 'a>
+        where O: ReduceLeft<A, B>, 'a: 'b, 'b: 'a
+    {
         self.map(move |output| output.reduce_left(&f))
     }
 
     /// Create a parser that right-reduces this parser down into another type according to the given reduction function.
-    pub fn reduce_right<A, B>(self, f: impl Fn(A, B) -> A + 'a) -> Parser<'a, T, A, E> where O: ReduceRight<A, B> {
+    pub fn reduce_right<'b, A, B>(self, f: impl Fn(A, B) -> A + Clone + 'a) -> Parser<'a, T, A, E, impl ParseFn<'b, T, A, E> + Captures<'b> + 'a>
+        where O: ReduceRight<A, B>, 'a: 'b, 'b: 'a
+    {
         self.map(move |output| output.reduce_right(&f))
     }
 
     /// Attempt to parse an array-like list of symbols using this parser.
     pub fn parse(&self, tokens: impl AsRef<[T]>) -> Result<O, E> {
         let mut tokens = tokens.as_ref().iter().cloned().enumerate();
-        let (fail, output) = (self.f)(&mut tokens).map_err(|e| e.take_error())?;
+        let (fail, output) = self.f.parse(&mut tokens).map_err(|e| e.take_error())?;
         if let Some((idx, tok)) = tokens.next() {
             Err(Fail::new(idx, E::unexpected(tok)).max(fail).take_error())
         } else {
@@ -491,8 +553,10 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, O, E> {
 }
 
 impl<'a, T: Clone + 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, (), E> {
-    fn padding<U: Padded>() -> Self where T: Borrow<U> {
-        Self::custom(|tokens| {
+    fn padding<'b, U: Padded>() -> Parser<'a, T, (), E, impl ParseFn<'b, T, (), E> + Captures<'b> + 'a>
+        where T: Borrow<U>, 'a: 'b, 'b: 'a
+    {
+        Parser::generic(|tokens: &mut TokenIter<T>| {
             while tokens
                 .clone()
                 .next()
@@ -512,27 +576,29 @@ impl<'a, T: Clone + 'a, E: ParseError<'a, T> + 'a> Parser<'a, T, T, E> {
         Self::try_map(move |tok| if f(tok.clone()) { Ok(tok) } else { Err(E::unexpected(tok)) })
     }
 
-    fn sym(expected: impl Borrow<T> + 'a) -> Self where T: PartialEq {
+    fn sym<U: Borrow<T> + 'a>(expected: U) -> Self where T: PartialEq {
         Self::permit(move |tok| &tok == expected.borrow())
     }
 
-    fn not_sym(expected: impl Borrow<T> + 'a) -> Self where T: PartialEq {
+    fn not_sym<U: Borrow<T> + 'a>(expected: U) -> Self where T: PartialEq {
         Self::permit(move |tok| &tok != expected.borrow())
     }
 
-    fn one_of(expected: impl IntoIterator<Item=impl Borrow<T> + 'a>) -> Self where T: PartialEq {
+    fn one_of<U: Borrow<T> + 'a>(expected: impl IntoIterator<Item=U>) -> Self where T: PartialEq {
         let expected = expected.into_iter().collect::<Vec<_>>();
         Self::permit(move |tok| expected.iter().any(|e| &tok == e.borrow()))
     }
 
-    fn none_of(expected: impl IntoIterator<Item=impl Borrow<T> + 'a>) -> Self where T: PartialEq {
+    fn none_of<U: Borrow<T> + 'a>(expected: impl IntoIterator<Item=U>) -> Self where T: PartialEq {
         let expected = expected.into_iter().collect::<Vec<_>>();
         Self::permit(move |tok| expected.iter().all(|e| &tok != e.borrow()))
     }
 
-    fn all_of(expected: impl IntoIterator<Item=impl Borrow<T> + 'a>) -> Parser<'a, T, Vec<T>, E> where T: PartialEq {
+    fn all_of<'b, U: Borrow<T> + Clone + 'a>(expected: impl IntoIterator<Item=U>) -> Parser<'a, T, Vec<T>, E, impl ParseFn<'b, T, Vec<T>, E> + Captures<'b> + 'a>
+        where T: PartialEq, 'a: 'b, 'b: 'a
+    {
         let expected = expected.into_iter().collect::<Vec<_>>();
-        Parser::custom(move |tokens| {
+        Parser::dynamic(move |tokens| { // TODO: Figure out why this doesn't work with dynamic
             let mut outputs = Vec::new();
             for expected in &expected {
                 match tokens.next() {
@@ -566,15 +632,15 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<'a, T> + 'a> Declaration<'a, T, O, 
     /// If the resultant parser is used before this declaration is defined (see `.define`) then a panic will occur.
     pub fn link(&self) -> Parser<'a, T, O, E> {
         let parser = Rc::downgrade(&self.parser);
-        Parser::custom(move |tokens| {
-            ((*parser.upgrade().expect("Parser was dropped")).borrow().as_ref().expect("Parser was declared but not defined").f)(tokens)
+        Parser::dynamic(move |tokens| {
+            (*parser.upgrade().expect("Parser was dropped")).borrow().as_ref().expect("Parser was declared but not defined").f.parse(tokens)
         })
     }
 
     /// Provider a parser definition for this declaration, thereby sealing it as a well-defined parser.
-    pub fn define(self, parser: Parser<'a, T, O, E>) -> Parser<'a, T, O, E> {
-        *self.parser.borrow_mut() = Some(parser);
-        Parser::custom(move |tokens| ((*self.parser).borrow().as_ref().unwrap().f)(tokens))
+    pub fn define(self, parser: Parser<'a, T, O, E, impl ParseFn<'a, T, O, E>>) -> Parser<'a, T, O, E> {
+        *self.parser.borrow_mut() = Some(parser.link());
+        Parser::dynamic(move |tokens| (*self.parser).borrow().as_ref().unwrap().f.parse(tokens))
     }
 }
 
@@ -614,27 +680,29 @@ fn try_parse<'a, T: Clone + 'a, R, F, E: ParseError<'a, T> + 'a>(tokens: &mut To
 // Utility
 
 /// A parser that accepts the given symbol.
-pub fn sym<'a, T: Clone + 'a + PartialEq, E: ParseError<'a, T> + 'a>(expected: impl Borrow<T> + 'a) -> Parser<'a, T, T, E> {
+pub fn sym<'a, T: Clone + 'a + PartialEq, E: ParseError<'a, T> + 'a, U: Borrow<T> + 'a>(expected: U) -> Parser<'a, T, T, E> {
     Parser::sym(expected)
 }
 
 /// A parser that accepts any one thing that is not the given symbol.
-pub fn not_sym<'a, T: Clone + 'a + PartialEq, E: ParseError<'a, T> + 'a>(expected: impl Borrow<T> + 'a) -> Parser<'a, T, T, E> {
+pub fn not_sym<'a, T: Clone + 'a + PartialEq, E: ParseError<'a, T> + 'a, U: Borrow<T> + 'a>(expected: U) -> Parser<'a, T, T, E> {
     Parser::not_sym(expected)
 }
 
 /// A parser that accepts one of the given set of symbols.
-pub fn one_of<'a, T: Clone + 'a + PartialEq, E: ParseError<'a, T> + 'a>(expected: impl IntoIterator<Item=impl Borrow<T> + 'a>) -> Parser<'a, T, T, E> {
+pub fn one_of<'a, T: Clone + 'a + PartialEq, E: ParseError<'a, T> + 'a, U: Borrow<T> + 'a>(expected: impl IntoIterator<Item=U>) -> Parser<'a, T, T, E> {
     Parser::one_of(expected)
 }
 
 /// A parser that accepts any one symbol that is not within the given set of symbols.
-pub fn none_of<'a, T: Clone + 'a + PartialEq, E: ParseError<'a, T> + 'a>(expected: impl IntoIterator<Item=impl Borrow<T> + 'a>) -> Parser<'a, T, T, E> {
+pub fn none_of<'a, T: Clone + 'a + PartialEq, E: ParseError<'a, T> + 'a, U: Borrow<T> + 'a>(expected: impl IntoIterator<Item=U>) -> Parser<'a, T, T, E> {
     Parser::none_of(expected)
 }
 
 /// A parser that accepts all of the given list of symbols, one after another.
-pub fn all_of<'a, T: Clone + 'a + PartialEq, E: ParseError<'a, T> + 'a>(expected: impl IntoIterator<Item=impl Borrow<T> + 'static>) -> Parser<'a, T, Vec<T>, E> {
+pub fn all_of<'b, 'a, T: Clone + 'a + PartialEq, E: ParseError<'a, T> + 'a, U: Borrow<T> + Clone + 'a>(expected: impl IntoIterator<Item=U>) -> Parser<'a, T, Vec<T>, E, impl ParseFn<'b, T, Vec<T>, E> + Captures<'b> + 'a>
+    where 'a: 'b, 'b: 'a
+{
     Parser::all_of(expected)
 }
 
@@ -662,19 +730,25 @@ pub fn any_sym<'a, T: Clone + 'a + PartialEq, E: ParseError<'a, T> + 'a>() -> Pa
 }
 
 /// A parser that accepts all input symbols.
-pub fn all_sym<'a, T: Clone + 'a + PartialEq, E: ParseError<'a, T> + 'a>() -> Parser<'a, T, Vec<T>, E> {
+pub fn all_sym<'b, 'a, T: Clone + 'a + PartialEq, E: ParseError<'a, T> + 'a>() -> Parser<'a, T, Vec<T>, E, impl ParseFn<'b, T, Vec<T>, E> + Captures<'b> + 'a>
+    where 'a: 'b, 'b: 'a
+{
     permit(|_| true).repeat(..)
 }
 
 /// A parser that accepts no input symbols.
-pub fn nothing<'a, T: Clone + 'a + PartialEq, E: ParseError<'a, T> + 'a>() -> Parser<'a, T, (), E> {
+pub fn nothing<'b, 'a, T: Clone + 'a + PartialEq, E: ParseError<'a, T> + 'a>() -> Parser<'a, T, (), E, impl ParseFn<'b, T, (), E> + Captures<'b> + 'a>
+    where 'a: 'b, 'b: 'a
+{
     permit(|_| false).discard()
 }
 
 /// A parser that accepts any number of 'padding' symbols. Usually, this is taken to mean whitespace.
 ///
 /// You can implement the `Padded` trait for your own symbol types to use this function with them.
-pub fn padding<'a, T: Clone + 'a, U: Padded, E: ParseError<'a, T> + 'a>() -> Parser<'a, T, (), E> where T: Borrow<U> {
+pub fn padding<'b, 'a, T: Clone + 'a, U: Padded, E: ParseError<'a, T> + 'a>() -> Parser<'a, T, (), E, impl ParseFn<'b, T, (), E> + Captures<'b> + 'a>
+    where T: Borrow<U>, 'a: 'b, 'b: 'a
+{
     Parser::padding()
 }
 

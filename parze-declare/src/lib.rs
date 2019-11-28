@@ -1,10 +1,18 @@
 #![feature(proc_macro_def_site, proc_macro_quote, proc_macro_hygiene, trait_alias)]
 
 mod rule;
+mod expr;
 
 extern crate proc_macro;
 
 use proc_macro::{TokenStream, TokenTree};
+
+#[derive(Debug)]
+enum Error {
+    UnexpectedToken,
+    ExpectedAtom,
+    ExpectedPunct,
+}
 
 trait TokenStreamExt {
     fn and(self, other: TokenStream) -> TokenStream;
@@ -23,6 +31,19 @@ impl TokenStreamExt for TokenTree {
         this.extend(Some(other));
         this
     }
+}
+
+trait TokenIter = Iterator<Item=TokenTree> + Clone;
+
+fn attempt<'a, 'c: 'a, I, R, E, F>(iter: &mut I, f: F) -> Result<R, E>
+    where
+        I: TokenIter,
+        F: FnOnce(&mut I) -> Result<R, E>,
+{
+    let mut iter2 = iter.clone();
+    let tok = f(&mut iter2)?;
+    *iter = iter2;
+    Ok(tok)
 }
 
 #[proc_macro]

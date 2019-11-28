@@ -5,16 +5,13 @@ use proc_macro::{
     Delimiter,
     quote,
 };
-use crate::TokenStreamExt;
-
-#[derive(Debug)]
-pub enum Error {
-    UnexpectedToken,
-    ExpectedAtom,
-    ExpectedPunct,
-}
-
-pub trait TokenIter = Iterator<Item=TokenTree> + Clone;
+use crate::{
+    expr::parse_atom_expr,
+    TokenIter,
+    TokenStreamExt,
+    Error,
+    attempt,
+};
 
 fn group_tree(delim: Delimiter, items: TokenStream) -> TokenTree {
     TokenTree::Group(Group::new(delim, items))
@@ -64,18 +61,6 @@ fn parse_atom(stream: &mut impl TokenIter) -> Result<TokenTree, Error> {
     })
 }
 
-fn parse_atom_expr(stream: &mut impl TokenIter) -> Result<TokenTree, Error> {
-    attempt(stream, |stream| {
-        let tt = stream.next().ok_or(Error::ExpectedAtom)?;
-        match &tt {
-            TokenTree::Group(_) => Ok(tt),
-            TokenTree::Literal(_) => Ok(tt),
-            TokenTree::Ident(_) => Ok(tt),
-            _ => Err(Error::ExpectedAtom),
-        }
-    })
-}
-
 fn parse_unary_suffix<I: TokenIter, P>(
     stream: &mut I,
     mut parse_item: impl FnMut(&mut I) -> Result<TokenTree, Error>,
@@ -97,7 +82,7 @@ fn parse_repeated(stream: &mut impl TokenIter) -> Result<TokenTree, Error> {
     parse_unary_suffix(
         stream,
         parse_atom,
-        |stream| parse_punct(stream, &["?", "+", "*", "~", ".%", ".#"]),
+        |stream| parse_punct(stream, &["?", "+", "*", "~", ".%", ".#", ".@"]),
         &mut |item, op| group_tree(
             Delimiter::Parenthesis,
             group_tree(Delimiter::Parenthesis, item.into())
@@ -108,6 +93,7 @@ fn parse_repeated(stream: &mut impl TokenIter) -> Result<TokenTree, Error> {
                     "~" => quote!(.before_padding()),
                     ".%" => quote!(.chained()),
                     ".#" => quote!(.flatten()),
+                    ".@" => quote!(.link()),
                     _ => unreachable!(),
                 })
         ),
@@ -248,21 +234,10 @@ fn parse_or(stream: &mut impl TokenIter) -> Result<TokenTree, Error> {
     )
 }
 
-pub fn parse_rule(stream: &mut impl TokenIter) -> Result<TokenTree, Error> {
+pub(crate) fn parse_rule(stream: &mut impl TokenIter) -> Result<TokenTree, Error> {
     let result = parse_or(stream)?;
     match stream.next() {
         Some(_) => Err(Error::UnexpectedToken),
         None => Ok(result),
     }
-}
-
-fn attempt<'a, 'c: 'a, I, R, E, F>(iter: &mut I, f: F) -> Result<R, E>
-    where
-        I: TokenIter,
-        F: FnOnce(&mut I) -> Result<R, E>,
-{
-    let mut iter2 = iter.clone();
-    let tok = f(&mut iter2)?;
-    *iter = iter2;
-    Ok(tok)
 }

@@ -61,8 +61,8 @@ default-features = false
 Here are the results of a JSON parsing test when compared with [`pom`](https://github.com/J-F-Liu/pom). More performance metrics to come later.
 
 ```
-test parze ... bench:   5,275,399 ns/iter (+/- 653,539)
-test pom   ... bench:  18,843,978 ns/iter (+/- 2,602,971)
+test parze ... bench:   3,989,738 ns/iter (+/- 1,172,835)
+test pom   ... bench:  22,620,632 ns/iter (+/- 5,713,893)
 ```
 
 ## Explicit Form

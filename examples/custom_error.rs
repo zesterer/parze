@@ -80,6 +80,7 @@ fn expect<'a>(c: char) -> Parser<'a, Token, (), BrainfuckError> {
             err.expected.insert(c);
             err
         })
+        .link()
 }
 
 fn main() {
