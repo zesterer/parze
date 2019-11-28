@@ -1,6 +1,6 @@
 [package]
 name = "parze"
-version = "0.6.0"
+version = "0.7.0"
 description = "A clean, efficient parser combinator"
 authors = ["Joshua Barretto <joshua.s.barretto@gmail.com>"]
 documentation = "https://docs.rs/parze"
@@ -18,7 +18,7 @@ nightly = []
 default = ["nightly", "macros"]
 
 [dependencies]
-parze-declare = { version = "0.1", path = "parze-declare" }
+parze-declare = { version = "0.2", path = "parze-declare" }
 
 [dev-dependencies]
 pom = "3.0"
