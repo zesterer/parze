@@ -21,8 +21,8 @@ pub enum JsonValue {
 #[bench]
 fn parze(b: &mut Bencher) {
     let json = parze::json();
-    b.iter(|| black_box(json.parse(<&[_]>::from(include_bytes!("sample.json"))).unwrap()));
-    //dbg!(parze::json().parse(<&[_]>::from(include_bytes!("small_sample.json"))));
+    b.iter(|| black_box(json.parse(include_bytes!("sample.json")).unwrap()));
+    //dbg!(parze::json().parse(include_bytes!("small_sample.json")));
 }
 
 #[bench]

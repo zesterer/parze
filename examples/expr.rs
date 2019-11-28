@@ -31,7 +31,7 @@ impl Expr {
 fn main() {
     parsers! {
         number = {
-            { one_of("0123456789".chars()) }+ => { |s| Expr::Literal(s.into_iter().collect::<String>().parse().unwrap()) }
+            { one_of("0123456789".chars()) }+ => { |s| Expr::Literal(s.collect::<String>().parse().unwrap()) }
         }
 
         atom = {
@@ -63,7 +63,7 @@ fn main() {
     }
 
     assert_eq!(
-        expr.parse("14 + 3 / 1 * (2 + 4) + -1".chars().collect::<Vec<_>>()).unwrap().eval(),
+        expr.parse_str("14 + 3 / 1 * (2 + 4) + -1").unwrap().eval(),
         31,
     );
 }

@@ -2,7 +2,7 @@
 #![feature(proc_macro_hygiene)]
 
 use parze::prelude::*;
-use std::{collections::HashMap, str};
+use std::collections::HashMap;
 
 #[derive(Debug, PartialEq)]
 pub enum JsonValue {
@@ -16,28 +16,28 @@ pub enum JsonValue {
 
 fn main() {
     parsers! {
-        integer = { { one_of(b"123456789") }.% % { one_of(b"0123456789") }* |% b'0'.% }
-        frac = { b'.'.% % { one_of(b"0123456789") }+ }
-        exp = { (b'e' | b'E').% % (b'+' | b'-')? % { one_of(b"0123456789") }+ }
-        number = { b'-'? % integer % frac?.# % exp?.# => { |b| str::from_utf8(&b.as_slice()).unwrap().parse().unwrap() } }
+        integer = { { one_of("123456789".chars()) }.% % { one_of("0123456789".chars()) }* |% '0'.% }
+        frac = { '.'.% % { one_of("0123456789".chars()) }+ }
+        exp = { ('e' | 'E').% % ('+' | '-')? % { one_of("0123456789".chars()) }+ }
+        number = { '-'? % integer % frac?.# % exp?.# => { |cs| cs.collect::<String>().parse().unwrap() } }
 
-        special = { b'\\' | b'/' | b'"' | b'b' -> b'\x08' | b'f' -> b'\x0C' | b'n' -> b'\n' | b'r' -> b'\r' | b't' -> b'\t' }
-        escape = { b'\\' -& special }
-        string = { b'"' -& ({ none_of(b"\\\"") } | escape)* &- b'"' => { |b| String::from_utf8(b).unwrap() } }
+        special = { '\\' | '/' | '"' | 'b' -> '\x08' | 'f' -> '\x0C' | 'n' -> '\n' | 'r' -> '\r' | 't' -> '\t' }
+        escape = { '\\' -& special }
+        string = { '"' -& ({ none_of("\\\"".chars()) } | escape)* &- '"' => { |cs| cs.collect::<String>() } }
 
-        elements = { value ... b','~ }
-        array = { b'['~ -& elements &- b']' }
+        elements = { value ... ','~ }
+        array = { '['~ -& elements &- ']' }
 
-        member = { string~ &- b':'~ & value }
-        members = { member ... b','~ }
+        member = { string~ &- ':'~ & value }
+        members = { member ... ','~ }
 
-        object = { b'{'~ -& members &- b'}' => { |m| m.into_iter().collect() } }
+        object = { '{'~ -& members &- '}' => { |m| m.collect() } }
 
         value: Parser<_, _> = {
             ~(
-                | { all_of(b"null") } => { |_| JsonValue::Null }
-                | { all_of(b"true") } => { |_| JsonValue::Bool(true) }
-                | { all_of(b"false") } => { |_| JsonValue::Bool(false) }
+                | { all_of("null".chars()) } => { |_| JsonValue::Null }
+                | { all_of("true".chars()) } => { |_| JsonValue::Bool(true) }
+                | { all_of("false".chars()) } => { |_| JsonValue::Bool(false) }
                 | number => { |n| JsonValue::Num(n) }
                 | string => { |s| JsonValue::Str(s) }
                 | array => { |a| JsonValue::Array(a) }
@@ -46,7 +46,7 @@ fn main() {
         }
     }
 
-    let test_json = br#"
+    let test_json = r#"
         {
             "parze": {
                 "description": "parser combinator library",
@@ -57,5 +57,5 @@ fn main() {
         }
     "#;
 
-    println!("{:#?}", value.parse(<&[_]>::from(test_json)));
+    println!("{:#?}", value.parse_str(test_json));
 }

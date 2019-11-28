@@ -36,9 +36,9 @@ fn main() {
                 | { all_of(b".") }    -> 'E'
                 | { all_of(b"-") }    -> 'T'
                 )~
-            ) * => { |cs| cs.into_iter().collect::<String>() }
+            ) * => { |cs| cs.collect::<String>() }
         }
     }
 
-    println!("{}", morse.parse(<&[_]>::from(b".... . .-.. .-.. --- .-- . .-.. -.-. --- -- . - --- .--. .- .-. --.. .")).unwrap());
+    println!("{}", morse.parse(b".... . .-.. .-.. --- .-- . .-.. -.-. --- -- . - --- .--. .- .-. --.. .").unwrap());
 }

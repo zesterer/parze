@@ -41,7 +41,7 @@ impl BrainfuckError {
     }
 }
 
-impl<'a> ParseError<'a, Token> for BrainfuckError {
+impl ParseError<Token> for BrainfuckError {
     fn unexpected(token: Token) -> Self {
         Self { found: Some(token), expected: HashSet::default() }
     }
@@ -100,7 +100,7 @@ fn main() {
     // This code contains an error
     let code = "+++!+[->++++<]>[->++++<].";
 
-    let error = bf.parse(code.chars().enumerate().collect::<Vec<_>>()).unwrap_err();
+    let error = bf.parse_str(code).unwrap_err();
 
     error.print(code);
 }

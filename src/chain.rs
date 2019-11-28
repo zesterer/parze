@@ -1,7 +1,10 @@
-pub trait Chain {
+use core::iter::FromIterator;
+
+pub trait Chain: Sized {
     type Item;
     type IntoIter: IntoIterator<Item=Self::Item>;
     fn into_iter_chain(self) -> <Self::IntoIter as IntoIterator>::IntoIter;
+    fn collect<T: FromIterator<Self::Item>>(self) -> T { self.into_iter_chain().collect() }
     fn as_slice(&self) -> &[Self::Item];
 }
 
