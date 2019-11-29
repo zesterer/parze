@@ -128,8 +128,8 @@ impl<T, O, E, F, G> ParseFn<T, O, E> for OrFn<F, G>
         G: ParseFn<T, O, E>,
 {
     fn parse(&self, tokens: &mut TokenIter<T>) -> ParseResult<O, E> {
-        let a = self.0.parse(tokens);
         let mut b_tokens = tokens.clone();
+        let a = self.0.parse(tokens);
         let b = self.1.parse(&mut b_tokens);
         match a {
             Ok((a_fail, a)) => match b {
