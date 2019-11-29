@@ -1,4 +1,7 @@
-use core::iter::FromIterator;
+use core::{
+    iter::FromIterator,
+    marker::PhantomData,
+};
 
 pub trait Chain: Sized {
     type Item;
@@ -15,7 +18,42 @@ impl<T> Chain for Vec<T> {
     fn as_slice(&self) -> &[Self::Item] { &self }
 }
 
+// Nothing
+
+pub struct Nothing<T>(PhantomData<T>);
+
+impl<T> Nothing<T> {
+    pub fn new() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<T> IntoIterator for Nothing<T> {
+    type Item = T;
+    type IntoIter = SingleIter<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        SingleIter(None)
+    }
+}
+
+impl<T> Chain for Nothing<T> {
+    type Item = T;
+    type IntoIter = <Self as IntoIterator>::IntoIter;
+    fn into_iter_chain(self) -> <Self::IntoIter as IntoIterator>::IntoIter { IntoIterator::into_iter(self) }
+    fn as_slice(&self) -> &[Self::Item] { &[] }
+}
+
+// Single
+
 pub struct Single<T>([T; 1]);
+
+impl<T> Single<T> {
+    pub fn into_inner(self) -> T {
+        let [inner] = self.0;
+        inner
+    }
+}
 
 impl<T> From<T> for Single<T> {
     fn from(item: T) -> Self {
@@ -39,6 +77,8 @@ impl<T> Chain for Single<T> {
     fn into_iter_chain(self) -> <Self::IntoIter as IntoIterator>::IntoIter { IntoIterator::into_iter(self) }
     fn as_slice(&self) -> &[Self::Item] { &self.0 }
 }
+
+// SingleIter
 
 pub struct SingleIter<T>(Option<T>);
 
@@ -65,16 +105,28 @@ impl<U: Chain> IntoChain for U {
 
 impl<T> IntoChain for Option<T> {
     type Item = T;
-    type Chain = OptionChain<T>;
+    type Chain = Optional<T>;
 
     fn into_chain(self) -> Self::Chain {
-        OptionChain(self.map(|item| [item]))
+        Optional(self.map(|item| [item]))
     }
 }
 
-pub struct OptionChain<T>(Option<[T; 1]>);
+// Optional
 
-impl<T> Chain for OptionChain<T> {
+pub struct Optional<T>(Option<[T; 1]>);
+
+impl<T> Optional<T> {
+    pub fn some(item: T) -> Self {
+        Self(Some([item]))
+    }
+
+    pub fn none() -> Self {
+        Self(None)
+    }
+}
+
+impl<T> Chain for Optional<T> {
     type Item = T;
     type IntoIter = <Self as IntoIterator>::IntoIter;
     fn into_iter_chain(self) -> <Self::IntoIter as IntoIterator>::IntoIter { IntoIterator::into_iter(self) }
@@ -83,7 +135,7 @@ impl<T> Chain for OptionChain<T> {
     }
 }
 
-impl<T> IntoIterator for OptionChain<T> {
+impl<T> IntoIterator for Optional<T> {
     type Item = T;
     type IntoIter = SingleIter<T>;
 

@@ -82,7 +82,7 @@ fn parse_repeated(stream: &mut impl TokenIter) -> Result<TokenTree, Error> {
     parse_unary_suffix(
         stream,
         parse_atom,
-        |stream| parse_punct(stream, &["?", "+", "*", "~", ".%", ".#", ".@", ".::"]),
+        |stream| parse_punct(stream, &["?", "+", "*", "~", ".#", ".@", ".::"]),
         &mut |item, op| group_tree(
             Delimiter::Parenthesis,
             group_tree(Delimiter::Parenthesis, item.into())
@@ -91,7 +91,6 @@ fn parse_repeated(stream: &mut impl TokenIter) -> Result<TokenTree, Error> {
                     "+" => quote!(.repeat(1..)),
                     "*" => quote!(.repeat(..)),
                     "~" => quote!(.before_padding()),
-                    ".%" => quote!(.chained()),
                     ".#" => quote!(.flatten()),
                     ".@" => quote!(.link()),
                     ".::" => quote!(.collect()),
@@ -187,7 +186,7 @@ fn parse_then(stream: &mut impl TokenIter) -> Result<TokenTree, Error> {
             Delimiter::Parenthesis,
             group_tree(Delimiter::Parenthesis, a.into())
                 .and(match op {
-                    "%" => quote!(.chain),
+                    "%" => quote!(.also),
                     "-&" => quote!(.delimiter_for),
                     "&-" => quote!(.delimited_by),
                     "&" => quote!(.then),

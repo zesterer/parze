@@ -33,16 +33,17 @@ fn pom(b: &mut Bencher) {
 
 mod parze {
     use parze::prelude::*;
+    use parze::chain::Single;
 
     use std::str;
     use super::JsonValue;
 
-    pub fn json() -> Parser<'static, u8, JsonValue> {
+    pub fn json() -> Parser<'static, u8, Vec<JsonValue>> {
         parsers! {
-            integer = { { one_of(b"123456789") }.% % { one_of(b"0123456789") }* |% b'0'.% }
-            frac = { b'.'.% % { one_of(b"0123456789") }+ }
-            exp = { (b'e' | b'E').% % (b'+' | b'-')? % { one_of(b"0123456789") }+ }
-            number: Parser<_, _, _, _> = { b'-'? % integer % frac?.# % exp?.# => { |b| str::from_utf8(&b.as_slice()).unwrap().parse().unwrap() } }
+            integer = { { one_of(b"123456789") } | { one_of(b"0123456789") }* | b'0' }
+            frac = { b'.' & { one_of(b"0123456789") }+ }
+            exp = { (b'e' | b'E') & (b'+' | b'-')? & { one_of(b"0123456789") }+ }
+            number = { b'-'? & integer & frac? & exp? => { |b| str::from_utf8(&b).unwrap().parse().unwrap() } }
 
             special = { b'\\' | b'/' | b'"' | b'b' -> b'\x08' | b'f' -> b'\x0C' | b'n' -> b'\n' | b'r' -> b'\r' | b't' -> b'\t' }
             escape = { b'\\' -& special }
@@ -51,7 +52,7 @@ mod parze {
             elements = { value ... b','~ }
             array = { b'['~ -& elements &- b']' }
 
-            member = { string~ &- b':'~ & value }
+            member = { string~ &- b':'~ % value => { |s: Single<(Single<String>, Vec<JsonValue>)>| { let (a, b) = s.into_inner(); (a.into_inner(), b.into_iter().next().unwrap()) } } }
             members = { member ... b','~ }
 
             object = { b'{'~ -& members &- b'}' => { |m| m.into_iter().collect() } }
@@ -61,10 +62,10 @@ mod parze {
                     | { all_of(b"null") } => { |_| JsonValue::Null }
                     | { all_of(b"true") } => { |_| JsonValue::Bool(true) }
                     | { all_of(b"false") } => { |_| JsonValue::Bool(false) }
-                    | number => { |n| JsonValue::Num(n) }
-                    | string => { |s| JsonValue::Str(s) }
-                    | array => { |a| JsonValue::Array(a) }
-                    | object => { |o| JsonValue::Object(o) }
+                    | number => { |n| JsonValue::Num(n.into_inner()) }
+                    | string => { |s| JsonValue::Str(s.into_inner()) }
+                    | array => { |a| JsonValue::Array(a.into_iter().collect()) }
+                    | object => { |o| JsonValue::Object(o.into_inner()) }
                 )~
             }
         }
