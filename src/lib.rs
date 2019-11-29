@@ -24,7 +24,7 @@
 //! enum Instr { Add, Sub, Left, Right, In, Out, Loop(Vec<Instr>) }
 //!
 //! parsers! {
-//!     bf: Parser<_, _> = {
+//!     bf: Parser<char, _> = {
 //!         ( '+' -> { Instr::Add }
 //!         | '-' -> { Instr::Sub }
 //!         | '<' -> { Instr::Left }
@@ -518,10 +518,10 @@ fn try_parse<'a, T: Clone + 'a, R, F, E: ParseError<T> + 'a>(tokens: &mut TokenI
 // Utility
 
 /// A parser that accepts the given symbol.
-pub fn sym<'b, 'a, T: Clone + 'a + PartialEq, E: ParseError<T> + 'a, U: Borrow<T> + Clone + 'a>(expected: U) -> Parser<'a, T, T, E, impl ParseFn<T, T, E> + Captures<'b> + 'a>
-    where 'a: 'b, 'b: 'a
+pub fn sym<'b, 'a, T: Clone + 'a, E: ParseError<T> + 'a, U: Clone + 'a>(expected: U) -> Parser<'a, T, T, E, impl ParseFn<T, T, E> + Captures<'b> + 'a>
+    where T: PartialEq<U>, 'a: 'b, 'b: 'a
 {
-    permit(move |tok: T| &tok == expected.borrow())
+    permit(move |tok: T| tok == expected)
 }
 
 /// A parser that accepts any one thing that is not the given symbol.
@@ -590,7 +590,7 @@ pub fn maybe_map<'b, 'a, T: Clone + 'a, O: 'a, E: ParseError<T> + 'a>(f: impl Fn
 }
 
 /// A parser that accepts any single symbol.
-pub fn any_sym<'b, 'a, T: Clone + 'a + PartialEq, E: ParseError<T> + 'a>() -> Parser<'a, T, T, E, impl ParseFn<T, T, E> + Captures<'b> + 'a>
+pub fn any_sym<'b, 'a, T: Clone + 'a, E: ParseError<T> + 'a>() -> Parser<'a, T, T, E, impl ParseFn<T, T, E> + Captures<'b> + 'a>
     where 'a: 'b, 'b: 'a
 {
     permit(|_| true)
@@ -603,11 +603,18 @@ pub fn all_sym<'b, 'a, T: Clone + 'a + PartialEq, E: ParseError<T> + 'a>() -> Pa
     permit(|_| true).repeat(..)
 }
 
-/// A parser that accepts no input symbols.
-pub fn nothing<'b, 'a, T: Clone + 'a + PartialEq, E: ParseError<T> + 'a>() -> Parser<'a, T, (), E, impl ParseFn<T, (), E> + Captures<'b> + 'a>
+/// A parser that does not accept any input symbols.
+pub fn nothing<'b, 'a, T: Clone + 'a, E: ParseError<T> + 'a>() -> Parser<'a, T, (), E, impl ParseFn<T, (), E> + Captures<'b> + 'a>
     where 'a: 'b, 'b: 'a
 {
     permit(|_| false).discard()
+}
+
+/// A parser that accepts no symbols.
+pub fn empty<'b, 'a, T: Clone + 'a + PartialEq, E: ParseError<T> + 'a>() -> Parser<'a, T, (), E, impl ParseFn<T, (), E> + Captures<'b> + 'a>
+    where 'a: 'b, 'b: 'a
+{
+    Parser::generic(|_| Ok((MayFail::none(), ())))
 }
 
 /// A parser that accepts any number of 'padding' symbols. Usually, this is taken to mean whitespace.
@@ -651,9 +658,12 @@ pub mod prelude {
         one_of,
         none_of,
         all_of,
+        nothing,
+        empty,
         permit,
         padding,
         maybe_map,
+        try_map,
         call,
         rule,
         parsers,
@@ -683,7 +693,7 @@ macro_rules! parze_error {
 ///         '!' | bar
 ///     }
 
-///     bar: Parser<_, _> = {
+///     bar: Parser<char, _> = {
 ///         '(' -& foo &- ')'
 ///     }
 /// }

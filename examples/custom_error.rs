@@ -80,7 +80,7 @@ fn expect<'a>(c: char) -> Parser<'a, Token, (), BrainfuckError> {
             err.expected.insert(c);
             err
         })
-        .link()
+        .to_object()
 }
 
 fn main() {
@@ -100,7 +100,7 @@ fn main() {
     // This code contains an error
     let code = "+++!+[->++++<]>[->++++<].";
 
-    let error = bf.parse_str(code).unwrap_err();
+    let error = bf.parse(&code.chars().enumerate().collect::<Vec<_>>()).unwrap_err();
 
     error.print(code);
 }

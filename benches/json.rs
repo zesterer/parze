@@ -54,7 +54,7 @@ mod parze {
             member = { string~ &- b':'~ & value }
             members = { member ... b','~ }
 
-            object = { b'{'~ -& members &- b'}' => { |m| m.into_iter().collect() } }
+            object = { b'{'~ -& members &- b'}' => { |m| m.collect() } }
 
             value = {
                 ~(

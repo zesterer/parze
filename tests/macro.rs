@@ -17,19 +17,19 @@ enum Instr {
 #[allow(unused_variables)]
 fn simple() {
     parsers! {
-        sym: Parser<_, _> = { '+' }
+        sym: Parser<char, _> = { '+' }
 
-        or: Parser<_, _> = { '+' | '-' }
+        or: Parser<char, _> = { '+' | '-' }
 
-        then: Parser<_, _> = { '+' & '-' }
+        then: Parser<char, _> = { '+' & '-' }
 
-        repeat_at_least_once: Parser<_, _> = { ('+' & '-')+ }
+        repeat_at_least_once: Parser<char, _> = { ('+' & '-')+ }
 
-        repeater_4: Parser<_, _> = { '+'* }
+        repeater_4: Parser<char, _> = { '+'* }
 
-        mapper: Parser<_, _> = { '+' => { |c| format!("{}", c) } }
+        mapper: Parser<char, _> = { '+' => { |c| format!("{}", c) } }
 
-        bf: Parser<_, _> = {
+        bf: Parser<char, _> = {
             ( '+' -> { Instr::Add }
             | '-' -> { Instr::Sub }
             | '<' -> { Instr::Left }
@@ -40,4 +40,6 @@ fn simple() {
             )*
         }
     }
+
+    bf.parse(&"++[,>>]++-".chars().collect::<Vec<_>>()).unwrap();
 }

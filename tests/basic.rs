@@ -59,5 +59,5 @@ fn brainfuck() {
         Instr::Out,
     ];
 
-    assert_eq!(bf.parse(program_src.chars().collect::<Vec<_>>()), Ok(program_tgt));
+    assert_eq!(bf.parse(&program_src.chars().collect::<Vec<_>>()), Ok(program_tgt));
 }
