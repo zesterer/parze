@@ -31,7 +31,7 @@
 //!         | '>' -> { Instr::Right }
 //!         | ',' -> { Instr::In }
 //!         | '.' -> { Instr::Out }
-//!         | '[' -& bf &- ']' => { |ts| Instr::Loop(ts) }
+//!         | '[' -& bf &- ']' => { |i| Instr::Loop(i) }
 //!         ) *
 //!     }
 //! }
@@ -248,7 +248,7 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<T> + 'a, F: ParseFn<T, O, E> + 'a> 
         Parser::new(ThenFn(self.f, other.f))
     }
 
-    /// Create a parser that parsers the same symbols as this parser, but emits its output as a vector
+    /// Create a parser that parsers the same symbols as this parser, but emits its output as a chain.
     ///
     /// This is most useful when you wish to use singular outputs as part of a chain.
     pub fn chained<'b>(self) -> Parser<'a, T, Single<O>, E, impl ParseFn<T, Single<O>, E> + Captures<'b> + 'a>
@@ -259,7 +259,7 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<T> + 'a, F: ParseFn<T, O, E> + 'a> 
 
     /// Create a parser that parses symbols that match this parser and then another parser.
     ///
-    /// Unlike `.then`, this method will chain the two parser outputs together as a vector.
+    /// Unlike `.then`, this method will chain the two parser outputs together as a chain.
     pub fn chain<'b, U: 'a, V: 'a, G: ParseFn<T, U, E> + 'a>(self, other: Parser<'a, T, U, E, G>) -> Parser<'a, T, Vec<V>, E, impl ParseFn<T, Vec<V>, E> + Captures<'b> + 'a>
         where O: IntoChain<Item=V>, U: IntoChain<Item=V>, 'a: 'b, 'b: 'a
     {

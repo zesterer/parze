@@ -23,7 +23,7 @@ parsers! {
         | '>' -> { Instr::Right }
         | ',' -> { Instr::In }
         | '.' -> { Instr::Out }
-        | '[' -& bf &- ']' => |ts| { Instr::Loop(ts) }
+        | '[' -& bf &- ']' => { |i| Instr::Loop(i) }
         ) *
     }
 }
@@ -79,7 +79,7 @@ let bf: Parser<_, _> = recursive(|bf| (
     .or(sym('>').to(Instr::Right))
     .or(sym(',').to(Instr::In))
     .or(sym('.').to(Instr::Out))
-    .or(sym('[').delimiter_for(bf).delimited_by(sym(']')).map(|ts| Instr::Loop(ts)))
+    .or(sym('[').delimiter_for(bf).delimited_by(sym(']')).map(|i| Instr::Loop(i)))
 ).repeat(..));
 ```
 
