@@ -295,18 +295,22 @@ impl<'a, T: Clone + 'a, O: 'a, E: ParseError<T> + 'a, F: ParseFn<T, O, E> + 'a> 
             let mut max_err = MayFail::none();
             let mut outputs = Vec::new();
 
+            let mut old_tokens = tokens.clone();
+
             for i in 0.. {
                 match self.f.parse(tokens) {
                     Ok((err, output)) => {
                         max_err = max_err.max(err);
                         outputs.push(output);
                     },
-                    Err(err) if i == 0 => {
+                    Err(err) => {
                         max_err = max_err.max(err);
+                        *tokens = old_tokens;
                         break;
                     },
-                    Err(err) => return Err(err.max(max_err)),
                 }
+
+                old_tokens = tokens.clone();
 
                 match other.f.parse(tokens) {
                     Ok((err, _)) => max_err = max_err.max(err),
