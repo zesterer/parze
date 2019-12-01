@@ -68,7 +68,7 @@ mod fail;
 /// | x ... y    | separated      | Equivalent to `x.separated_by(y)`     |
 /// | x & y      | then           | Equivalent to `x.then(y)`             |
 /// | x % y      | chain          | Equivalent to `x.chain(y)`            |
-/// | x |% y     | or chain       | Equivalent to `x.or_chain(y)`         |
+/// | x \|% y    | or chain       | Equivalent to `x.or_chain(y)`         |
 /// | x -& y     | delimiter for  | Equivalent to `x.delimiter_for(y)`    |
 /// | x &- y     | delimited by   | Equivalent to `x.delimited_by(y)`     |
 /// | x -> Y     | to             | Equivalent to `x.to(y)`               |
