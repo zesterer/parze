@@ -91,4 +91,4 @@ Parze is distributed under either of:
 
 - MIT license (LICENSE-MIT or http://opensource.org/licenses/MIT)
 
-at the disgression of the user.
+at the discretion of the user.
