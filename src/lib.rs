@@ -57,8 +57,8 @@ mod fail;
 ///
 /// | Syntax     | Name           | Description                           |
 /// |------------|----------------|---------------------------------------|
-/// | ~ x        | before padding | Equivalent to `x.before_padding()`    |
-/// | x ~        | after padding  | Equivalent to `x.after_padding()`     |
+/// | ~ x        | after padding  | Equivalent to `x.after_padding()`     |
+/// | x ~        | before padding | Equivalent to `x.before_padding()`    |
 /// | x *        | any            | Equivalent to `x.repeat(..)`          |
 /// | x +        | at least one   | Equivalent to `x.repeat(1..)`         |
 /// | x ?        | optional       | Equivalent to `x.or_not()`            |
