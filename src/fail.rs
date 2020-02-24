@@ -13,7 +13,7 @@ impl<E> Fail<E> {
     }
 
     pub fn map_err<G>(self, f: impl Fn(E) -> G) -> Fail<G> {
-        Self(self.0, f(self.1))
+        Fail(self.0, f(self.1))
     }
 
     #[inline(always)]
