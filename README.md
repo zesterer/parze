@@ -1,6 +1,10 @@
 [![crates.io](https://img.shields.io/crates/v/parze.svg)](https://crates.io/crates/parze)
 [![crates.io](https://docs.rs/parze/badge.svg)](https://docs.rs/parze)
 
+**Parze is now deprecated**
+
+*Take a look at [chumsky](https://github.com/zesterer/chumsky/), a from-scratch reimplementation of parze with more features, better performance, and a cleaner API.*
+
 # Parze
 
 Parze is a clean, efficient parser combinator written in Rust.
